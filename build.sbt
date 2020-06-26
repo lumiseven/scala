@@ -67,7 +67,7 @@ lazy val publishSettings : Seq[Setting[_]] = Seq(
 // should not be set directly. It is the same as the Maven version and derived automatically from `baseVersion` and
 // `baseVersionSuffix`.
 globalVersionSettings
-Global / baseVersion       := "2.13.3"
+Global / baseVersion       := "2.13.4"
 Global / baseVersionSuffix := "SNAPSHOT"
 ThisBuild / organization   := "org.scala-lang"
 ThisBuild / homepage       := Some(url("https://www.scala-lang.org"))
@@ -329,6 +329,71 @@ val mimaFilterSettings = Seq {
     ProblemFilters.exclude[ReversedMissingMethodProblem]("scala.collection.SortedMap.scala$collection$SortedMap$$super=uals"),
 
     ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.immutable.Vector.prependedAll0"),
+
+    // async
+    ProblemFilters.exclude[ReversedMissingMethodProblem]("scala.reflect.runtime.ReflectSetup.phaseWithId"),
+
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.reflect.macros.Attachments.removeElement"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.reflect.macros.Attachments.addElement"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.reflect.macros.Attachments.containsElement"),
+
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.reflect.runtime.Settings.async"),
+
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.reflect.api.Internals#InternalApi.markForAsyncTransform"),
+
+    // Fix for scala/bug#11976
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#AbstractJMapWrapper.filterImpl"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#AbstractJMapWrapper.strictOptimizedCollect"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#AbstractJMapWrapper.strictOptimizedConcat"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#AbstractJMapWrapper.strictOptimizedFlatMap"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#AbstractJMapWrapper.strictOptimizedFlatten"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#AbstractJMapWrapper.strictOptimizedMap"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#AbstractJMapWrapper.strictOptimizedZip"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JCollectionWrapper.filterImpl"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JCollectionWrapper.strictOptimizedCollect"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JCollectionWrapper.strictOptimizedConcat"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JCollectionWrapper.strictOptimizedFlatMap"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JCollectionWrapper.strictOptimizedFlatten"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JCollectionWrapper.strictOptimizedMap"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JCollectionWrapper.strictOptimizedZip"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JIterableWrapper.filterImpl"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JIterableWrapper.strictOptimizedCollect"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JIterableWrapper.strictOptimizedConcat"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JIterableWrapper.strictOptimizedFlatMap"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JIterableWrapper.strictOptimizedFlatten"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JIterableWrapper.strictOptimizedMap"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JIterableWrapper.strictOptimizedZip"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JListWrapper.filterImpl"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JListWrapper.strictOptimizedCollect"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JListWrapper.strictOptimizedConcat"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JListWrapper.strictOptimizedFlatMap"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JListWrapper.strictOptimizedFlatten"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JListWrapper.strictOptimizedMap"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JListWrapper.strictOptimizedZip"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JPropertiesWrapper.filterImpl"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JPropertiesWrapper.strictOptimizedCollect"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JPropertiesWrapper.strictOptimizedConcat"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JPropertiesWrapper.strictOptimizedFlatMap"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JPropertiesWrapper.strictOptimizedFlatten"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JPropertiesWrapper.strictOptimizedMap"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JPropertiesWrapper.strictOptimizedZip"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JSetWrapper.filterImpl"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JSetWrapper.strictOptimizedCollect"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JSetWrapper.strictOptimizedConcat"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JSetWrapper.strictOptimizedFlatMap"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JSetWrapper.strictOptimizedFlatten"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JSetWrapper.strictOptimizedMap"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#JSetWrapper.strictOptimizedZip"),
+    ProblemFilters.exclude[MissingTypesProblem]("scala.collection.convert.JavaCollectionWrappers$AbstractJMapWrapper"),
+    ProblemFilters.exclude[MissingTypesProblem]("scala.collection.convert.JavaCollectionWrappers$JCollectionWrapper"),
+    ProblemFilters.exclude[MissingTypesProblem]("scala.collection.convert.JavaCollectionWrappers$JConcurrentMapWrapper"),
+    ProblemFilters.exclude[MissingTypesProblem]("scala.collection.convert.JavaCollectionWrappers$JIterableWrapper"),
+    ProblemFilters.exclude[MissingTypesProblem]("scala.collection.convert.JavaCollectionWrappers$JListWrapper"),
+    ProblemFilters.exclude[MissingTypesProblem]("scala.collection.convert.JavaCollectionWrappers$JMapWrapper"),
+    ProblemFilters.exclude[MissingTypesProblem]("scala.collection.convert.JavaCollectionWrappers$JMapWrapperLike"),
+    ProblemFilters.exclude[MissingTypesProblem]("scala.collection.convert.JavaCollectionWrappers$JPropertiesWrapper"),
+    ProblemFilters.exclude[MissingTypesProblem]("scala.collection.convert.JavaCollectionWrappers$JSetWrapper"),
+    ProblemFilters.exclude[MissingTypesProblem]("scala.collection.mutable.WeakHashMap"),
   ),
 }
 
@@ -817,7 +882,7 @@ lazy val partest = configureAsSubproject(project)
   .settings(
     name := "scala-partest",
     description := "Scala Compiler Testing Tool",
-    libraryDependencies ++= List(testInterfaceDep, diffUtilsDep),
+    libraryDependencies ++= List(testInterfaceDep, diffUtilsDep, junitDep),
     pomDependencyExclusions ++= List((organization.value, "scala-repl-frontend"), (organization.value, "scala-compiler-doc")),
     fixPom(
       "/project/name" -> <name>Scala Partest</name>,
@@ -1171,6 +1236,7 @@ lazy val root: Project = (project in file("."))
         partestDesc("instrumented presentation"),
         partestDesc("--srcpath scaladoc"),
         partestDesc("--srcpath macro-annot"),
+        partestDesc("--srcpath async"),
         (osgiTestFelix / Test / Keys.test).result map (_ -> "osgiTestFelix/test"),
         (osgiTestEclipse / Test / Keys.test).result map (_ -> "osgiTestEclipse/test"),
         (library / mimaReportBinaryIssues).result map (_ -> "library/mimaReportBinaryIssues"),
