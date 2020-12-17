@@ -31,7 +31,7 @@ abstract class CleanUp extends Statics with Transform with ast.TreeDSL {
   private val entryPoints = perRunCaches.newSet[Symbol]() // : List[Symbol] = Nil
   def getEntryPoints: List[String] = entryPoints.toList.map(_.fullName('.')).sorted
 
-  protected def newTransformer(unit: CompilationUnit): Transformer =
+  protected def newTransformer(unit: CompilationUnit): AstTransformer =
     new CleanUpTransformer(unit)
 
   class CleanUpTransformer(unit: CompilationUnit) extends StaticsTransformer {
@@ -51,7 +51,7 @@ abstract class CleanUp extends Statics with Transform with ast.TreeDSL {
       symbolsStoredAsStatic.clear()
     }
     private def transformTemplate(tree: Tree) = {
-      val Template(_, _, body) = tree
+      val Template(_, _, body) = tree: @unchecked
       clearStatics()
       val newBody = transformTrees(body)
       val templ   = deriveTemplate(tree)(_ => transformTrees(newStaticMembers.toList) ::: newBody)
@@ -287,6 +287,7 @@ abstract class CleanUp extends Statics with Transform with ast.TreeDSL {
                 case nme.update => REF(arrayUpdateMethod) APPLY List(args(0), (REF(unboxMethod(IntClass)) APPLY args(1)), args(2))
                 case nme.apply  => REF(arrayApplyMethod) APPLY List(args(0), (REF(unboxMethod(IntClass)) APPLY args(1)))
                 case nme.clone_ => REF(arrayCloneMethod) APPLY List(args(0))
+                case x          => throw new MatchError(x)
               },
               mustBeUnit = methSym.name == nme.update
             )
@@ -353,6 +354,7 @@ abstract class CleanUp extends Statics with Transform with ast.TreeDSL {
               }
             case NoType =>
               abort(ad.symbol.toString)
+            case x => throw new MatchError(x)
           }
           typedPos {
             val sym = currentOwner.newValue(mkTerm("qual"), ad.pos) setInfo qual0.tpe
@@ -398,12 +400,16 @@ abstract class CleanUp extends Statics with Transform with ast.TreeDSL {
 
     // transform scrutinee of all matches to ints
     def transformSwitch(sw: Match): Tree = { import CODE._
-      sw.selector.tpe match {
+      sw.selector.tpe.widen match {
         case IntTpe => sw // can switch directly on ints
         case StringTpe =>
           // these assumptions about the shape of the tree are justified by the codegen in MatchOptimization
-          val Match(Typed(selTree: Ident, _), cases) = sw
-          val sel = selTree.symbol
+          val Match(Typed(selTree, _), cases) = sw: @unchecked
+          def selArg = selTree match {
+            case x: Ident   => REF(x.symbol)
+            case x: Literal => x
+            case x          => throw new MatchError(x)
+          }
           val restpe = sw.tpe
           val swPos = sw.pos.focus
 
@@ -429,7 +435,7 @@ abstract class CleanUp extends Statics with Transform with ast.TreeDSL {
            */
 
           val stats = mutable.ListBuffer.empty[Tree]
-          var failureBody = Throw(New(definitions.MatchErrorClass.tpe_*, REF(sel))) : Tree
+          var failureBody = Throw(New(definitions.MatchErrorClass.tpe_*, selArg)) : Tree
 
           // genbcode isn't thrilled about seeing labels with Unit arguments, so `success`'s type is one of
           // `${sw.tpe} => ${sw.tpe}` or `() => Unit` depending.
@@ -447,7 +453,14 @@ abstract class CleanUp extends Statics with Transform with ast.TreeDSL {
           val failure = currentOwner.newLabel(unit.freshTermName("matchEnd"), swPos).setInfo(MethodType(Nil, restpe))
           def fail(): Tree = atPos(swPos) { Apply(REF(failure), Nil) }
 
-          val newSel = atPos(sel.pos) { IF (sel OBJ_EQ NULL) THEN LIT(0) ELSE (Apply(REF(sel) DOT Object_hashCode, Nil)) }
+          val ifNull = LIT(0)
+          val noNull = Apply(selArg DOT Object_hashCode, Nil)
+
+          val newSel = selTree match {
+            case _: Ident   => atPos(selTree.symbol.pos) { IF(selTree.symbol OBJ_EQ NULL) THEN ifNull ELSE noNull }
+            case x: Literal => atPos(selTree.pos) { if (x.value.value == null) ifNull else noNull }
+            case x          => throw new MatchError(x)
+          }
           val casesByHash =
             cases.flatMap {
               case cd@CaseDef(StringsPattern(strs), _, body) =>
@@ -465,7 +478,7 @@ abstract class CleanUp extends Statics with Transform with ast.TreeDSL {
                 case (next, (pat, jump, pos)) =>
                   val comparison = if (pat == null) Object_eq else Object_equals
                   atPos(pos) {
-                    IF(LIT(pat) DOT comparison APPLY REF(sel)) THEN (REF(jump) APPLY Nil) ELSE next
+                    IF(LIT(pat) DOT comparison APPLY selArg) THEN (REF(jump) APPLY Nil) ELSE next
                   }
               }
               CaseDef(LIT(hash), EmptyTree, newBody)
@@ -481,7 +494,7 @@ abstract class CleanUp extends Statics with Transform with ast.TreeDSL {
 
           stats prepend Match(newSel, newCases :+ CaseDef(Ident(nme.WILDCARD), EmptyTree, fail()))
 
-          val res = Block(stats.result : _*)
+          val res = Block(stats.result() : _*)
           localTyper.typedPos(sw.pos)(res)
         case _ => globalError(s"unhandled switch scrutinee type ${sw.selector.tpe}: $sw"); sw
       }

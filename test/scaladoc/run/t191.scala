@@ -34,6 +34,7 @@ object Test extends ScaladocModelTest {
 
   def scalaURL = "http://bog.us"
   val jdkURL = "http://java.us"
+  val jvmDir   = if (scala.util.Properties.isJavaAtLeast(9)) "java.base/" else ""
 
   override def scaladocSettings = {
     val samplePath = getClass.getClassLoader.getResource("scala/Function1.class").getPath
@@ -76,14 +77,15 @@ object Test extends ScaladocModelTest {
                       ).map( _.split("#").toSeq ).map({
                         case Seq(one)      => scalaURL + "/" + one + ".html"
                         case Seq(one, two) => scalaURL + "/" + one + ".html#" + two
-                      }) ++ Set(s"$jdkURL/java/lang/Throwable.html")
+                        case x             => throw new MatchError(x)
+                      }) ++ Set(s"$jdkURL/${jvmDir}java/lang/Throwable.html")
 
     def isExpectedExternalLink(l: EntityLink) = l.link match {
       case LinkToExternalTpl(name, baseUrlString, tpl: TemplateEntity) =>
         val baseUrl = new URI(Page.makeUrl(baseUrlString, Page.templateToPath(tpl)))
         val url = if (name.isEmpty) baseUrl
                   else new URI(baseUrl.getScheme, baseUrl.getSchemeSpecificPart, name)
-        assert(expectedUrls contains url.toString, url.toString + " " + expectedUrls)
+        assert(expectedUrls.contains(url.toString), s"Expected $url in:${expectedUrls.map("\n  " + _).mkString}")
         true
       case _ => false
     }

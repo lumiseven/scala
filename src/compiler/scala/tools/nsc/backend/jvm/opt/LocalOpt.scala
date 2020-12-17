@@ -267,7 +267,7 @@ abstract class LocalOpt {
       currentTrace = after
     }
 
-    /**
+    /*
      * Runs the optimizations that depend on each other in a loop until reaching a fixpoint. See
      * comment in class [[LocalOpt]].
      *
@@ -806,7 +806,7 @@ object LocalOptImpls {
    * before, so that `BackendUtils.isLabelReachable` gives a correct answer.
    */
   def removeEmptyExceptionHandlers(method: MethodNode): RemoveHandlersResult = {
-    /** True if there exists code between start and end. */
+    /* True if there exists code between start and end. */
     @tailrec
     def containsExecutableCode(start: AbstractInsnNode, end: LabelNode): Boolean = {
       start != end && ((start.getOpcode: @switch) match {
@@ -871,7 +871,13 @@ object LocalOptImpls {
       val index = local.index
       // parameters and `this` (the lowest indices, starting at 0) are never removed or renumbered
       if (index >= firstLocalIndex) {
-        if (!variableIsUsed(local.start, local.end, index)) localsIter.remove()
+        def previousOrSelf(insn: AbstractInsnNode) = insn.getPrevious match {
+          case null => insn
+          case i => i
+        }
+        val storeInsn = previousOrSelf(local.start) // the start index is after the store, see scala/scala#8897
+        val used = variableIsUsed(storeInsn, local.end, index)
+        if (!used) localsIter.remove()
         else if (renumber(index) != index) local.index = renumber(index)
       }
     }
@@ -938,6 +944,7 @@ object LocalOptImpls {
           if (oldIndex >= firstLocalIndex && renumber(oldIndex) != oldIndex) varIns match {
             case vi: VarInsnNode => vi.`var` = renumber(slot)
             case ii: IincInsnNode => ii.`var` = renumber(slot)
+            case x                => throw new MatchError(x)
           }
         case _ =>
       }
@@ -1021,7 +1028,7 @@ object LocalOptImpls {
       removeJumpFromMap(jump)
     }
 
-    /**
+    /*
      * Removes a conditional jump if it is followed by a GOTO to the same destination.
      *
      *      CondJump l;  [nops];  GOTO l;  [...]
@@ -1042,7 +1049,7 @@ object LocalOptImpls {
       case _ => false
     }
 
-    /**
+    /*
      * Replace jumps to a sequence of GOTO instructions by a jump to the final destination.
      *
      * {{{
@@ -1064,7 +1071,7 @@ object LocalOptImpls {
       case _ => false
     }
 
-    /**
+    /*
      * Eliminates unnecessary jump instructions
      *
      * {{{
@@ -1082,7 +1089,7 @@ object LocalOptImpls {
       case _ => false
     }
 
-    /**
+    /*
      * If the "else" part of a conditional branch is a simple GOTO, negates the conditional branch
      * and eliminates the GOTO.
      *
@@ -1113,7 +1120,7 @@ object LocalOptImpls {
       case _ => false
     }
 
-    /**
+    /*
      * Inlines xRETURN and ATHROW
      *
      * {{{
@@ -1141,20 +1148,20 @@ object LocalOptImpls {
       case _ => false
     })
 
-    /**
-      * Replace conditional jump instructions with GOTO or NOP if statically known to be true or false.
-      *
-      * {{{
-      *      ICONST_0; IFEQ l;
-      *   => ICONST_0; POP; GOTO l;
-      *
-      *      ICONST_1; IFEQ l;
-      *   => ICONST_1; POP;
-      * }}}
-      *
-      * Note that the LOAD/POP pairs will be removed later by `eliminatePushPop`, and the code between
-      * the GOTO and `l` will be removed by DCE (if it's not jumped into from somewhere else).
-      */
+    /*
+     * Replace conditional jump instructions with GOTO or NOP if statically known to be true or false.
+     *
+     * {{{
+     *      ICONST_0; IFEQ l;
+     *   => ICONST_0; POP; GOTO l;
+     *
+     *      ICONST_1; IFEQ l;
+     *   => ICONST_1; POP;
+     * }}}
+     *
+     * Note that the LOAD/POP pairs will be removed later by `eliminatePushPop`, and the code between
+     * the GOTO and `l` will be removed by DCE (if it's not jumped into from somewhere else).
+     */
     def simplifyConstantConditions(instruction: AbstractInsnNode): Boolean = {
       def replace(jump: JumpInsnNode, success: Boolean): Boolean = {
         if (success) method.instructions.insert(jump, new JumpInsnNode(GOTO, jump.label))

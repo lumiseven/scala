@@ -14,6 +14,10 @@
 package scala.reflect
 package runtime
 
+import scala.annotation.nowarn
+
+@nowarn("cat=deprecation&origin=scala\\.reflect\\.internal\\.Internals\\.compat")
+@nowarn("cat=deprecation&origin=scala\\.reflect\\.internal\\.Trees\\.emptyValDef")
 trait JavaUniverseForce { self: runtime.JavaUniverse  =>
   def force(): Unit = {
     Literal(Constant(42)).duplicate
@@ -67,6 +71,7 @@ trait JavaUniverseForce { self: runtime.JavaUniverse  =>
     this.MultiargInfixAttachment
     this.NullaryOverrideAdapted
     this.ChangeOwnerAttachment
+    this.InterpolatedString
     this.noPrint
     this.typeDebug
     // inaccessible: this.posAssigner
@@ -296,6 +301,8 @@ trait JavaUniverseForce { self: runtime.JavaUniverse  =>
     definitions.IterableClass
     definitions.ListClass
     definitions.SeqClass
+    definitions.SeqFactoryClass
+    definitions.UnapplySeqWrapperClass
     definitions.JavaStringBuilderClass
     definitions.JavaStringBufferClass
     definitions.JavaCharSequenceClass
@@ -342,6 +349,7 @@ trait JavaUniverseForce { self: runtime.JavaUniverse  =>
     definitions.BlackboxContextClass
     definitions.WhiteboxContextClass
     definitions.MacroImplAnnotation
+    definitions.MacroImplLocationAnnotation
     definitions.StringContextClass
     definitions.StringContextModule
     definitions.ValueOfClass
@@ -425,6 +433,11 @@ trait JavaUniverseForce { self: runtime.JavaUniverse  =>
     definitions.NowarnClass
     definitions.uncheckedStableClass
     definitions.uncheckedVarianceClass
+    definitions.ChildAnnotationClass
+    definitions.RepeatedAnnotationClass
+    definitions.TargetNameAnnotationClass
+    definitions.StaticMethodAnnotationClass
+    definitions.PolyFunctionClass
     definitions.BeanPropertyAttr
     definitions.BooleanBeanPropertyAttr
     definitions.CompileTimeOnlyAttr

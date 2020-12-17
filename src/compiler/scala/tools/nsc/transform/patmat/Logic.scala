@@ -51,7 +51,7 @@ trait Logic extends Debugging  {
     type Type
     type Tree
 
-    class Prop
+    sealed abstract class Prop
     final case class Eq(p: Var, q: Const) extends Prop
 
     type Const
@@ -204,14 +204,14 @@ trait Logic extends Debugging  {
         else if (size == 2) { // Specialized versions for size 2+3
           val it = ops0.iterator
           val result = checkPair(it.next(), it.next())
-          assert(!it.hasNext)
+          assert(!it.hasNext, "iterator must be empty")
           result
         } else if (size == 3) {
           val it = ops0.iterator
           val a = it.next()
           val b = it.next()
           val c = it.next()
-          assert(!it.hasNext)
+          assert(!it.hasNext, "iterator must be empty")
           checkPair(a, b) || checkPair(a, c) || checkPair(b, c)
         } else {
           val ops = new Array[Prop](size)
@@ -242,12 +242,14 @@ trait Logic extends Debugging  {
 
       // push negation inside formula
       def negationNormalFormNot(p: Prop): Prop = p match {
-        case And(ops) => Or(mapConserve(ops)(negationNormalFormNot)) // De Morgan
-        case Or(ops)  => And(mapConserve(ops)(negationNormalFormNot)) // De Morgan
-        case Not(p)   => negationNormalForm(p)
-        case True     => False
-        case False    => True
-        case s: Sym   => Not(s)
+        case And(ops)         => Or(mapConserve(ops)(negationNormalFormNot)) // De Morgan
+        case Or(ops)          => And(mapConserve(ops)(negationNormalFormNot)) // De Morgan
+        case Not(p)           => negationNormalForm(p)
+        case True             => False
+        case False            => True
+        case s: Sym           => Not(s)
+        case Eq(_, _)         => Not(p)
+        case p @ AtMostOne(_) => Not(p)
       }
 
       def negationNormalForm(p: Prop): Prop = p match {
@@ -261,6 +263,7 @@ trait Logic extends Debugging  {
         case True
              | False
              | (_: Sym)
+             | (_: Eq)
              | (_: AtMostOne)   => p
       }
 
@@ -411,10 +414,9 @@ trait Logic extends Debugging  {
 
       object gatherEqualities extends PropTraverser {
         override def apply(p: Prop) = p match {
-          case Eq(v, c) =>
-            vars += v
-            v.registerEquality(c)
-          case _ => super.apply(p)
+          case Eq(v, NullConst) if !modelNull => vars += v // not modeling equality to null
+          case Eq(v, c)                       => vars += v; v.registerEquality(c)
+          case _                              => super.apply(p)
         }
       }
 
@@ -484,7 +486,7 @@ trait Logic extends Debugging  {
     type Solvable
 
     def propToSolvable(p: Prop): Solvable = {
-      val (eqAxiom, pure :: Nil) = removeVarEq(List(p), modelNull = false)
+      val (eqAxiom, pure :: Nil) = removeVarEq(List(p), modelNull = false): @unchecked
       eqFreePropToSolvable(And(eqAxiom, pure))
     }
 
@@ -610,7 +612,7 @@ trait ScalaLogic extends Interface with Logic with TreeAndTypeAnalysis {
           // else  debug.patmat("NOT implies: "+(lower, upper))
 
 
-        /** Does V=A preclude V=B?
+        /* Does V=A preclude V=B?
          *
          * (0) A or B must be in the domain to draw any conclusions.
          *
@@ -796,7 +798,7 @@ trait ScalaLogic extends Interface with Logic with TreeAndTypeAnalysis {
     // (At least conceptually: `true` is an instance of class `Boolean`)
     private def widenToClass(tp: Type): Type =
       if (tp.typeSymbol.isClass) tp
-      else if (tp.baseClasses.isEmpty) throw new IllegalArgumentException("Bad type: " + tp)
+      else if (tp.baseClasses.isEmpty) AnyTpe
       else tp.baseType(tp.baseClasses.head)
 
     object TypeConst extends TypeConstExtractor {

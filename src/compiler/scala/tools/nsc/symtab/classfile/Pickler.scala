@@ -24,7 +24,7 @@ import scala.reflect.internal.util.shortClassOfInstance
 import scala.collection.mutable
 import PickleFormat._
 import Flags._
-import scala.annotation.tailrec
+import scala.annotation.{nowarn, tailrec}
 
 /**
  * Serialize a top-level module and/or class.
@@ -54,6 +54,7 @@ abstract class Pickler extends SubComponent {
       syms.foreach { sym =>
         pickle.putDecl(sym)
       }
+      pickle.writeArray()
     }
   }
 
@@ -67,6 +68,7 @@ abstract class Pickler extends SubComponent {
       else
         None
 
+    @nowarn("cat=lint-nonlocal-return")
     def apply(unit: CompilationUnit): Unit = {
       def pickle(tree: Tree): Unit = {
         tree match {
@@ -171,7 +173,7 @@ abstract class Pickler extends SubComponent {
     private lazy val nonClassRoot = findSymbol(root.ownersIterator)(!_.isClass)
     def include(sym: Symbol) = !noPrivates || !sym.isPrivate || (sym.owner.isTrait && sym.isAccessor)
 
-    def close(): Unit = { writeArray(); index = null; entries = null }
+    def close(): Unit = { index = null; entries = null }
 
     private def isRootSym(sym: Symbol) =
       sym.name.toTermName == rootName && sym.owner == rootOwner
@@ -567,6 +569,7 @@ abstract class Pickler extends SubComponent {
         case StaticallyAnnotatedType(annots, tp) => writeRef(tp) ; writeRefs(annots)
         case AnnotatedType(_, tp)                => writeTypeBody(tp) // write the underlying type if there are no static annotations
         case CompoundType(parents, _, clazz)     => writeRef(clazz); writeRefs(parents)
+        case x                                   => throw new MatchError(x)
       }
 
       def writeTreeBody(tree: Tree): Unit = {
@@ -629,7 +632,7 @@ abstract class Pickler extends SubComponent {
     }
 
     /** Write byte array */
-    private def writeArray(): Unit = {
+    final def writeArray(): Unit = {
       assert(writeIndex == 0, "Index must be zero")
       assert(index ne null, this)
       writeNat(MajorVersion)

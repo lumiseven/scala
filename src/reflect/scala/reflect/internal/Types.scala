@@ -2070,7 +2070,7 @@ trait Types
 
   object ConstantType extends ConstantTypeExtractor {
     def apply(c: Constant): ConstantType = FoldableConstantType(c)
-    def unapply(tpe: ConstantType): Option[Constant] = Some(tpe.value)
+    def unapply(tpe: ConstantType): Some[Constant] = Some(tpe.value)
   }
 
   /** A class representing the inferred type of a constant value. Constant types and their
@@ -2765,7 +2765,7 @@ trait Types
   }
 
   protected def defineNormalized(tr: TypeRef): Unit = {
-    tr.defineNormalized
+    tr.defineNormalized()
   }
 
   protected def defineParentsOfTypeRef(tpe: TypeRef) = {
@@ -4186,7 +4186,7 @@ trait Types
     def apply(tparams: List[Symbol], tpe: Type): Type =
       if (tparams.isEmpty) tpe else PolyType(tparams, tpe)
 
-    def unapply(tpe: Type): Option[(List[Symbol], Type)] = tpe match {
+    def unapply(tpe: Type): Some[(List[Symbol], Type)] = tpe match {
       case PolyType(tparams, restpe) => Some((tparams, restpe))
       case _                         => Some((Nil, tpe))
     }
@@ -4198,6 +4198,57 @@ trait Types
 
   /** A creator for a type functions, assuming the type parameters tps already have the right owner. */
   def typeFun(tps: List[Symbol], body: Type): Type = PolyType(tps, body)
+
+  /** We will need to clone the info of the original method (which obtains clones
+   *  of the method type parameters), clone the type parameters of the value class,
+   *  and create a new polymethod with the union of all those type parameters, with
+   *  their infos adjusted to be consistent with their new home. Example:
+   *
+   *    class Foo[+A <: AnyRef](val xs: List[A]) extends AnyVal {
+   *      def baz[B >: A](x: B): List[B] = x :: xs
+   *      // baz has to be transformed into this extension method, where
+   *      // A is cloned from class Foo and  B is cloned from method baz:
+   *      // def extension\$baz[B >: A <: Any, A >: Nothing <: AnyRef](\$this: Foo[A])(x: B): List[B]
+   *    }
+   *
+   *  TODO: factor out the logic for consolidating type parameters from a class
+   *  and a method for re-use elsewhere, because nobody will get this right without
+   *  some higher level facilities.
+   */
+  def extensionMethInfo(currentOwner: Symbol, extensionMeth: Symbol, origInfo: Type, clazz: Symbol): Type = {
+    val GenPolyType(tparamsFromMethod, methodResult) = origInfo cloneInfo extensionMeth
+    // Start with the class type parameters - clones will be method type parameters
+    // so must drop their variance.
+    val tparamsFromClass = cloneSymbolsAtOwner(clazz.typeParams, extensionMeth) map (_ resetFlag COVARIANT | CONTRAVARIANT)
+
+    val thisParamType = appliedType(clazz, tparamsFromClass.map(_.tpeHK))
+    val thisParam     = extensionMeth.newValueParameter(nme.SELF, extensionMeth.pos) setInfo thisParamType
+    val resultType    = MethodType(List(thisParam), dropNullaryMethod(methodResult))
+    val selfParamType = singleType(currentOwner.companionModule.thisType, thisParam)
+
+    def fixres(tp: Type)    = tp.substThisAndSym(clazz, selfParamType, clazz.typeParams, tparamsFromClass)
+    def fixtparam(tp: Type) = tp.substSym(clazz.typeParams, tparamsFromClass)
+
+    // We can't substitute symbols on the entire polytype because we
+    // need to modify the bounds of the cloned type parameters, but we
+    // don't want to substitute for the cloned type parameters themselves.
+    val tparams = tparamsFromMethod ::: tparamsFromClass
+    tparams.foreach(_ modifyInfo fixtparam)
+    GenPolyType(tparams, fixres(resultType))
+
+    // For reference, calling fix on the GenPolyType plays out like this:
+    // error: scala.reflect.internal.Types$TypeError: type arguments [B#7344,A#6966]
+    // do not conform to method extension$baz#16148's type parameter bounds
+    //
+    // And the difference is visible here.  See how B is bounded from below by A#16149
+    // in both cases, but in the failing case, the other type parameter has turned into
+    // a different A. (What is that A? It is a clone of the original A created in
+    // SubstMap during the call to substSym, but I am not clear on all the particulars.)
+    //
+    //  bad: [B#16154 >: A#16149, A#16155 <: AnyRef#2189]($this#16156: Foo#6965[A#16155])(x#16157: B#16154)List#2457[B#16154]
+    // good: [B#16151 >: A#16149, A#16149 <: AnyRef#2189]($this#16150: Foo#6965[A#16149])(x#16153: B#16151)List#2457[B#16151]
+  }
+
 
   /** A creator for existential types. This generates:
    *
@@ -4223,7 +4274,7 @@ trait Types
      */
     def transitiveReferredFrom(tpe: Type): List[Symbol] = tparams match {
       case tparam :: Nil =>
-        // This is for optimisationa: should be equivalent to general one.
+        // This is for optimisation: should be equivalent to general one.
         if (tpe contains tparam) tparams else Nil
       case _ =>
         /* Algorithm to compute transitive closure, using several temporary lists (mutable ListBuffer)
@@ -4241,7 +4292,7 @@ trait Types
         val closed    = mutable.ListBuffer.empty[Symbol]
         var nextBorder = mutable.ListBuffer.empty[Symbol]
         while (!border.isEmpty) {
-          nextBorder.clear
+          nextBorder.clear()
           pending.filterInPlace { paramTodo =>
             !border.exists(_.info contains paramTodo) || {
               nextBorder += paramTodo;
@@ -4354,15 +4405,6 @@ trait Types
 
   def containsExistential(tpe: Type) = tpe.exists(_.typeSymbol.isExistentiallyBound)
   def existentialsInType(tpe: Type) = tpe.withFilter(_.typeSymbol.isExistentiallyBound).map(_.typeSymbol)
-
-  private def isDummyOf(tpe: Type)(targ: Type) = {
-    val sym = targ.typeSymbol
-    sym.isTypeParameter && sym.owner == tpe.typeSymbol
-  }
-  def isDummyAppliedType(tp: Type) = tp.dealias match {
-    case tr @ TypeRef(_, _, args) => args exists isDummyOf(tr)
-    case _                        => false
-  }
 
   def typeParamsToExistentials(clazz: Symbol, tparams: List[Symbol]): List[Symbol] = {
     val eparams = tparams map (tparam =>
@@ -4710,7 +4752,7 @@ trait Types
   /** def isNonValueType(tp: Type) = !isValueElseNonValue(tp) */
 
   def isNonRefinementClassType(tpe: Type) = tpe match {
-    case SingleType(_, sym) => sym.isModuleClass
+    case SingleType(_, sym) => sym.isModuleOrModuleClass
     case TypeRef(_, sym, _) => sym.isClass && !sym.isRefinementClass
     case ErrorType          => true
     case _                  => false
@@ -5225,11 +5267,15 @@ trait Types
         invalidateCaches(tp, updatedSyms)
       }
 
-  def invalidateCaches(t: Type, updatedSyms: List[Symbol]) =
+  def invalidateCaches(t: Type, updatedSyms: List[Symbol]): Unit =
     t match {
-      case st: SingleType   if updatedSyms.contains(st.sym) => st.invalidateSingleTypeCaches()
       case tr: TypeRef      if updatedSyms.contains(tr.sym) => tr.invalidateTypeRefCaches()
       case ct: CompoundType if ct.baseClasses.exists(updatedSyms.contains) => ct.invalidatedCompoundTypeCaches()
+      case st: SingleType =>
+        if (updatedSyms.contains(st.sym)) st.invalidateSingleTypeCaches()
+        val underlying = st.underlying
+        if (underlying ne st)
+          invalidateCaches(underlying, updatedSyms)
       case _ =>
     }
 

@@ -97,7 +97,9 @@ trait PatternTypers {
       // Dueling test cases: pos/overloaded-unapply.scala, run/case-class-23.scala, pos/t5022.scala
       // A case class with 23+ params has no unapply method.
       // A case class constructor may be overloaded with unapply methods in the companion.
-      else if (canElide && caseClass.isCase && !member.isOverloaded)
+      // A case class maybe have its own custom unapply (so non-synthetic) scala/bug#11252
+      // Unapply methods aren't `isCaseApplyOrUnapply` in Scala 3 tasty/run/src-2/tastytest/TestColour.scala
+      else if (canElide && caseClass.isCase && !member.isOverloaded && (member == NoSymbol || member.isSynthetic))
         logResult(s"convertToCaseConstructor($fun, $caseClass, pt=$pt)")(convertToCaseConstructor(fun, caseClass, pt))
       else if (!reallyExists(member))
         CaseClassConstructorError(fun, s"${fun.symbol} is not a case class, nor does it have a valid unapply/unapplySeq member")
@@ -139,7 +141,7 @@ trait PatternTypers {
     }
 
     protected def typedStarInPattern(tree: Tree, mode: Mode, pt: Type) = {
-      val Typed(expr, tpt) = tree
+      val Typed(expr, tpt) = tree: @unchecked
       val exprTyped = typed(expr, mode)
       val baseClass = exprTyped.tpe.typeSymbol match {
         case ArrayClass   => ArrayClass
@@ -309,7 +311,7 @@ trait PatternTypers {
               }
 
               val GenPolyType(freeVars, unappFormal) = freshArgType(unapplyType.skolemizeExistential(context.owner, tree))
-              val unapplyContext = context.makeNewScope(context.tree, context.owner)
+              val unapplyContext = context.makeNewScope(tree, context.owner)
               freeVars foreach unapplyContext.scope.enter
               val pattp = newTyper(unapplyContext).infer.inferTypedPattern(tree, unappFormal, pt, canRemedy)
               // turn any unresolved type variables in freevars into existential skolems

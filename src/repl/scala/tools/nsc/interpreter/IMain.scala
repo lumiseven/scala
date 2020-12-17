@@ -408,7 +408,7 @@ class IMain(val settings: Settings, parentClassLoaderOverride: Option[ClassLoade
     exitingTyper {
       req.defines filterNot (s => req.defines contains s.companionSymbol) foreach { newSym =>
         val oldSym = replScope lookup newSym.name.companionName
-        if (Seq(oldSym, newSym).permutations exists { case Seq(s1, s2) => s1.isClass && s2.isModule }) {
+        if (Seq(oldSym, newSym).permutations exists { case Seq(s1, s2) => s1.isClass && s2.isModule case _ => false }) {
           replwarn(s"warning: previously defined $oldSym is not a companion to $newSym.")
           replwarn("Companions must be defined together; you may wish to use :paste mode for this.")
         }
@@ -494,7 +494,7 @@ class IMain(val settings: Settings, parentClassLoaderOverride: Option[ClassLoade
     *  and evaluation results, are printed via the supplied compiler's
     *  reporter. Values defined are available for future interpreted strings.
     *
-    *  The return value is whether the line was interpreter successfully,
+    *  The return value is whether the line was interpreted successfully,
     *  e.g. that there were no parse errors.
     */
   override def interpretFinally(line: String): Result = doInterpret(line, synthetic = false, fatally = true)
@@ -834,7 +834,7 @@ class IMain(val settings: Settings, parentClassLoaderOverride: Option[ClassLoade
 
 
     private val USER_CODE_PLACEHOLDER = newTermName("$user_code_placeholder$")
-    private object spliceUserCode extends Transformer {
+    private object spliceUserCode extends AstTransformer {
       var parents: List[Tree] = Nil
       override def transform(tree: Tree): Tree = {
         parents ::= tree
@@ -923,7 +923,7 @@ class IMain(val settings: Settings, parentClassLoaderOverride: Option[ClassLoade
            |object ${lineRep.evalName} {
            |  ${if (resValSym != NoSymbol) s"lazy val ${lineRep.resultName} = ${originalPath(resValSym)}" else ""}
            |  lazy val ${lineRep.printName}: _root_.java.lang.String = $executionWrapper {
-           |    $fullAccessPath
+           |    val _ = $fullAccessPath
            |""".stripMargin)
         if (contributors.lengthCompare(1) > 0) {
           code.println("val sb = new _root_.scala.StringBuilder")

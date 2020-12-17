@@ -29,12 +29,14 @@ object ScalaSigParser {
     import classFile._
 
     def getBytes(bytesElem: AnnotationElement): Array[Byte] = bytesElem.elementValue match {
-      case ConstValueIndex(index) => bytesForIndex(index)
+      case ConstValueIndex(index)     => bytesForIndex(index)
       case ArrayValue(signatureParts) => mergedLongSignatureBytes(signatureParts)
+      case x                          => throw new MatchError(x)
     }
 
     def mergedLongSignatureBytes(signatureParts: Seq[ElementValue]): Array[Byte] = signatureParts.iterator.flatMap {
       case ConstValueIndex(index) => bytesForIndex(index)
+      case x                      => throw new MatchError(x)
     }.toArray
 
     def bytesForIndex(index: Int) = constantWrapped(index).asInstanceOf[StringBytesPair].bytes
@@ -115,7 +117,7 @@ case class ScalaSig(majorVersion: Int, minorVersion: Int, table: Seq[Int ~ ByteC
   implicit def applyRule[A](parser: ScalaSigParsers.Parser[A]) = ScalaSigParsers.expect(parser)(this)
 
   override def toString = "ScalaSig version " + majorVersion + "." + minorVersion + {
-    for (i <- 0 until table.size) yield i + ":\t" + parseEntry(i) // + "\n\t" + getEntry(i)
+    for (i <- 0 until table.size) yield "" + i + ":\t" + parseEntry(i) // + "\n\t" + getEntry(i)
   }.mkString("\n", "\n", "")
 
   lazy val symbols: Seq[Symbol] = ScalaSigParsers.symbols

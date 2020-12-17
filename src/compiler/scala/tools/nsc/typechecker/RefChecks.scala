@@ -78,7 +78,7 @@ abstract class RefChecks extends Transform {
     false
   }
 
-  class RefCheckTransformer(unit: CompilationUnit) extends Transformer {
+  class RefCheckTransformer(unit: CompilationUnit) extends AstTransformer {
 
     var localTyper: analyzer.Typer = typer
     var currentApplication: Tree = EmptyTree
@@ -284,10 +284,10 @@ abstract class RefChecks extends Transform {
         macroStr + member.defStringSeenAs(self.memberInfo(member)) + location
       }
 
-      /** Check that all conditions for overriding `other` by `member` of class `clazz` are met.
-        *
-        * TODO: error messages could really be improved, including how they are composed
-        */
+      /* Check that all conditions for overriding `other` by `member` of class `clazz` are met.
+       *
+       * TODO: error messages could really be improved, including how they are composed
+       */
       def checkOverride(pair: SymbolPair): Unit = {
         import pair.{highType, lowType, highInfo, rootType}
 
@@ -403,7 +403,7 @@ abstract class RefChecks extends Transform {
             if (!(memberOverrides || other.isDeferred) && !member.isSynthetic) {
               overrideErrorConcreteMissingOverride()
             } else if (other.isAbstractOverride && other.isIncompleteIn(clazz) && !member.isAbstractOverride) {
-              overrideErrorWithMemberInfo("`abstract override' modifiers required to override:")
+              overrideErrorWithMemberInfo("`abstract override` modifiers required to override:")
             }
             else if (memberOverrides && (other hasFlag ACCESSOR) && !(other hasFlag STABLE | DEFERRED)) {
               // TODO: this is not covered by the spec.
@@ -414,7 +414,7 @@ abstract class RefChecks extends Transform {
                      !member.isDeferred && !other.isDeferred &&
                      intersectionIsEmpty(member.extendedOverriddenSymbols, other.extendedOverriddenSymbols)) {
               overrideErrorWithMemberInfo("cannot override a concrete member without a third member that's overridden by both " +
-                                          "(this rule is designed to prevent ``accidental overrides'')")
+                                          "(this rule is designed to prevent accidental overrides)")
             } else if (other.isStable && !member.isStable) { // (1.4)
               overrideErrorWithMemberInfo("stable, immutable value required to override:")
             } else if (member.isValue && member.isLazy &&
@@ -523,7 +523,7 @@ abstract class RefChecks extends Transform {
         }
       }
 
-      val opc = new overridingPairs.Cursor(clazz)
+      val opc = new overridingPairs.PairsCursor(clazz)
       while (opc.hasNext) {
         if (!opc.high.isClass)
           checkOverride(opc.currentPair)
@@ -1137,19 +1137,50 @@ abstract class RefChecks extends Transform {
         else warnIfLubless()
       }
     }
+
+    private def checkSensibleAnyEquals(pos: Position, qual: Tree, name: Name, sym: Symbol, other: Tree) = {
+      def underlyingClass(tp: Type): Symbol = {
+        val sym = tp.widen.typeSymbol
+        if (sym.isAbstractType) underlyingClass(sym.info.upperBound)
+        else sym
+      }
+      val receiver = underlyingClass(qual.tpe)
+      val actual   = underlyingClass(other.tpe)
+      def typesString = "" + normalizeAll(qual.tpe.widen) + " and " + normalizeAll(other.tpe.widen)
+      def nonSensiblyEquals() = {
+        refchecksWarning(pos, s"comparing values of types $typesString using `${name.decode}` unsafely bypasses cooperative equality; use `==` instead", WarningCategory.OtherNonCooperativeEquals)
+      }
+      def isScalaNumber(s: Symbol) = s isSubClass ScalaNumberClass
+      def isJavaNumber(s: Symbol)  = s isSubClass JavaNumberClass
+      def isAnyNumber(s: Symbol)   = isScalaNumber(s) || isJavaNumber(s)
+      def isNumeric(s: Symbol)     = isNumericValueClass(unboxedValueClass(s)) || isAnyNumber(s)
+      def isReference(s: Symbol)   = (unboxedValueClass(s) isSubClass AnyRefClass) || (s isSubClass ObjectClass)
+      def isUnit(s: Symbol)        = unboxedValueClass(s) == UnitClass
+      def isNumOrNonRef(s: Symbol) = isNumeric(s) || (!isReference(s) && !isUnit(s))
+      if (isNumeric(receiver) && isNumOrNonRef(actual)) {
+        if (receiver == actual) ()
+        else nonSensiblyEquals()
+      }
+      else if ((sym == Any_equals || sym == Object_equals) && isNumOrNonRef(actual) && !isReference(receiver)) {
+        nonSensiblyEquals()
+      }
+    }
+
     /** Sensibility check examines flavors of equals. */
     def checkSensible(pos: Position, fn: Tree, args: List[Tree]) = fn match {
       case Select(qual, name @ (nme.EQ | nme.NE | nme.eq | nme.ne)) if args.length == 1 && isObjectOrAnyComparisonMethod(fn.symbol) && (!currentOwner.isSynthetic || currentOwner.isAnonymousFunction) =>
         checkSensibleEquals(pos, qual, name, fn.symbol, args.head)
+      case Select(qual, name @ nme.equals_) if args.length == 1 && (!currentOwner.isSynthetic || currentOwner.isAnonymousFunction) =>
+        checkSensibleAnyEquals(pos, qual, name, fn.symbol, args.head)
       case _ =>
     }
 
     // scala/bug#6276 warn for trivial recursion, such as `def foo = foo` or `val bar: X = bar`, which come up more frequently than you might think.
     // TODO: Move to abide rule. Also, this does not check that the def is final or not overridden, for example
     def checkInfiniteLoop(sym: Symbol, rhs: Tree): Unit =
-      if (!sym.isValueParameter && sym.paramss.isEmpty) {
+      if (!sym.isValueParameter && sym.paramss.forall(_.isEmpty)) {
         rhs match {
-          case t@(Ident(_) | Select(This(_), _)) if t hasSymbolWhich (_.accessedOrSelf == sym) =>
+          case Ident(_) | Select(This(_), _) | Apply(Select(This(_), _), _) if rhs hasSymbolWhich (_.accessedOrSelf == sym) =>
             refchecksWarning(rhs.pos, s"${sym.fullLocationString} does nothing other than call itself recursively", WarningCategory.Other)
           case _ =>
         }
@@ -1508,6 +1539,7 @@ abstract class RefChecks extends Transform {
               // the companion class is actually not a ClassSymbol, but a reference to an abstract type.
               module.symbol.companionClass.isClass
             )
+        case x => throw new MatchError(x)
       }
 
       sym.name == nme.apply &&
@@ -1744,7 +1776,7 @@ abstract class RefChecks extends Transform {
             tree
 
           case treeInfo.WildcardStarArg(_) if !isRepeatedParamArg(tree) =>
-            reporter.error(tree.pos, "no `: _*' annotation allowed here\n"+
+            reporter.error(tree.pos, "no `: _*` annotation allowed here\n"+
               "(such annotations are only allowed in arguments to *-parameters)")
             tree
 

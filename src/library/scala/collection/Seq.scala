@@ -15,6 +15,7 @@ package scala.collection
 import scala.collection.immutable.Range
 import scala.util.hashing.MurmurHash3
 import Searching.{Found, InsertionPoint, SearchResult}
+import scala.annotation.nowarn
 
 /** Base trait for sequence collections
   *
@@ -29,25 +30,19 @@ trait Seq[+A]
 
   override def iterableFactory: SeqFactory[Seq] = Seq
 
-  /** Method called from equality methods, so that user-defined subclasses can
-    *  refuse to be equal to other collections of the same kind.
-    *  @param   that   The object with which this $coll should be compared
-    *  @return  `true`, if this $coll can possibly equal `that`, `false` otherwise. The test
-    *           takes into consideration only the run-time types of objects but ignores their elements.
-    */
   def canEqual(that: Any): Boolean = true
 
-  override def equals(o: scala.Any): Boolean = this.eq(o.asInstanceOf[AnyRef]) || (
-    o match {
-      case it: Seq[A] => (it eq this) || (it canEqual this) && sameElements(it)
+  override def equals(o: Any): Boolean =
+    (this eq o.asInstanceOf[AnyRef]) || (o match {
+      case seq: Seq[A] if seq.canEqual(this) => sameElements(seq)
       case _ => false
-    }
-  )
+    })
 
   override def hashCode(): Int = MurmurHash3.seqHash(toIterable)
 
   override def toString(): String = super[Iterable].toString()
 
+  @nowarn("""cat=deprecation&origin=scala\.collection\.Iterable\.stringPrefix""")
   override protected[this] def stringPrefix: String = "Seq"
 }
 

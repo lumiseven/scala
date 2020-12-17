@@ -16,6 +16,8 @@ package collection
 import scala.util.hashing.MurmurHash3
 import java.lang.String
 
+import scala.annotation.nowarn
+
 /** Base trait for set collections.
   */
 trait Set[A]
@@ -27,19 +29,18 @@ trait Set[A]
   def canEqual(that: Any) = true
 
   override def equals(that: Any): Boolean =
-    that match {
-      case set: Set[A] =>
-        (this eq set) ||
-          (set canEqual this) &&
-            (toIterable.size == set.size) &&
-            (this subsetOf set)
-      case _ => false
-    }
+    (this eq that.asInstanceOf[AnyRef]) || (that match {
+      case set: Set[A] if set.canEqual(this) =>
+        (this.size == set.size) && this.subsetOf(set)
+      case _ =>
+        false
+    })
 
   override def hashCode(): Int = MurmurHash3.setHash(toIterable)
 
   override def iterableFactory: IterableFactory[Set] = Set
 
+  @nowarn("""cat=deprecation&origin=scala\.collection\.Iterable\.stringPrefix""")
   override protected[this] def stringPrefix: String = "Set"
 
   override def toString(): String = super[Iterable].toString() // Because `Function1` overrides `toString` too

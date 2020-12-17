@@ -595,7 +595,7 @@ class MutableSettings(val errorFn: String => Unit, val pathFactory: PathFactory)
     withHelpSyntax(s"$name:<${helpArg}s>")
 
     object ChoiceOrVal {
-      def unapply(a: domain.Value): Option[(String, String, List[domain.Choice])] = a match {
+      def unapply(a: domain.Value): Some[(String, String, List[domain.Choice])] = a match {
         case c: domain.Choice => Some((c.name, c.help, c.expandsTo))
         case v: domain.Value  => Some((v.toString, "", Nil))
       }
@@ -636,7 +636,7 @@ class MutableSettings(val errorFn: String => Unit, val pathFactory: PathFactory)
         case _ => true
       }
 
-      /**
+      /*
        * Expand an expanding option, if necessary recursively. Expanding options are not included in
        * the result (consistent with "_", which is not in `value` either).
        *
@@ -764,21 +764,19 @@ class MutableSettings(val errorFn: String => Unit, val pathFactory: PathFactory)
 
     withHelpSyntax(name + ":<" + arg + ">")
 
-    // try to set. halting means halt at first non-arg
+    // try to set. halting means halt at first non-arg i.e. at next option
     protected def tryToSetArgs(args: List[String], halting: Boolean) = {
       @tailrec
-      def loop(args: List[String]): List[String] = args match {
-        case arg :: rest =>
-          if (halting && (arg startsWith "-")) args
-          else {
-            if (helpText.isDefined && arg == "help") sawHelp = true
-            else if (prepend) value ::= arg
-            else value ++= List(arg)
-            loop(rest)
-          }
-        case Nil         => Nil
+      def loop(seen: List[String], args: List[String]): (List[String], List[String]) = args match {
+        case Optionlike() :: _ if halting         => (seen, args)
+        case "help" :: rest if helpText.isDefined => sawHelp = true ; loop(seen, rest)
+        case arg :: rest                          => loop(arg :: seen, rest)
+        case Nil                                  => (seen, Nil)
       }
-      Some(loop(if (prepend) args.reverse else args))
+      val (seen, rest) = loop(Nil, args)
+      if (prepend) value = value.prependedAll(seen.reverse)
+      else value = value.appendedAll(seen.reverse)
+      Some(rest)
     }
     def tryToSet(args: List[String])                  = tryToSetArgs(args, halting = true)
     override def tryToSetColon(args: List[String])    = tryToSetArgs(args, halting = false)

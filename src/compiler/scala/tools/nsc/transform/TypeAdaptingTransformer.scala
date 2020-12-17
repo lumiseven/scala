@@ -88,17 +88,17 @@ trait TypeAdaptingTransformer { self: TreeDSL =>
           if (treeInfo isExprSafeToInline side) value
           else BLOCK(side, value)
         val tree1 = pt match {
-          case ErasedValueType(clazz, BoxedUnitTpe) =>
-            cast(preservingSideEffects(tree, REF(BoxedUnit_UNIT)), pt)
-          case ErasedValueType(clazz, underlying) => cast(unboxValueClass(tree, clazz, underlying), pt)
+          case ErasedValueType(clazz, BoxedUnitTpe) => cast(preservingSideEffects(tree, REF(BoxedUnit_UNIT)), pt)
+          case ErasedValueType(clazz, underlying)   => cast(unboxValueClass(tree, clazz, underlying), pt)
           case _ =>
             pt.typeSymbol match {
               case UnitClass  =>
                 preservingSideEffects(tree, UNIT)
-              case x          =>
-                assert(x != ArrayClass, "array")
-                // don't `setType pt` the Apply tree, as the Apply's fun won't be typechecked if the Apply tree already has a type
-                Apply(currentRun.runDefinitions.unboxMethod(pt.typeSymbol), tree)
+              case ArrayClass => assert(pt.typeSymbol != ArrayClass, "array") ; tree
+              case _          =>
+                val unboxer = currentRun.runDefinitions.unboxMethod(pt.typeSymbol)
+                if (settings.developer) assert(boxedClass(pt.typeSymbol).tpe <:< tree.tpe, s"${tree.tpe} is not a boxed ${pt}")
+                Apply(unboxer, tree)  // don't `setType pt` the Apply tree, as the Apply's fun won't be typechecked if the Apply tree already has a type
             }
         }
         typedPos(tree.pos)(tree1)
@@ -143,6 +143,7 @@ trait TypeAdaptingTransformer { self: TreeDSL =>
             // Push the cast into the RHS of matchEnd LabelDefs.
             ld.symbol.modifyInfo {
               case MethodType(params, _) => MethodType(params, pt)
+              case x                     => throw new MatchError(x)
             }
             deriveLabelDef(ld)(rhs => cast(rhs, pt)).setType(pt)
           case _ =>
@@ -159,7 +160,6 @@ trait TypeAdaptingTransformer { self: TreeDSL =>
      */
     @tailrec final def adaptToType(tree: Tree, pt: Type): Tree = {
       val tpe = tree.tpe
-
       if ((tpe eq pt) || tpe <:< pt) tree
       else if (tpe.isInstanceOf[ErasedValueType]) adaptToType(box(tree), pt) // what if pt is an erased value type?
       else if (pt.isInstanceOf[ErasedValueType])  adaptToType(unbox(tree, pt), pt)

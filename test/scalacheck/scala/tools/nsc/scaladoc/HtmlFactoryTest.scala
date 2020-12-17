@@ -504,7 +504,7 @@ object HtmlFactoryTest extends Properties("HtmlFactory") {
 
   property("Indentation normalization for code blocks") = {
     checkTemplate("code-indent.scala", "C.html") { (_, s) =>
-      s.contains("<pre>a typicial indented\ncomment on multiple\ncomment lines</pre>") &&
+      s.contains("<pre>a typical indented\ncomment on multiple\ncomment lines</pre>") &&
       s.contains("<pre>one liner</pre>") &&
       s.contains("<pre>two lines, one useful</pre>") &&
       s.contains("<pre>line1\nline2\nline3\nline4</pre>") &&
@@ -537,16 +537,17 @@ object HtmlFactoryTest extends Properties("HtmlFactory") {
     val files = createTemplates("basic.scala")
     //println(files)
 
-    property("class") = files.get("com/example/p1/Clazz.html").exists { page =>
-      val html = toHtml(page)
-
-      property("implicit conversion") = html contains """<span class="modifier">implicit </span>"""
-
-      property("gt4s") = html contains """title="gt4s: $colon$colon""""
-
-      property("gt4s of a deprecated method") = html contains """title="gt4s: $colon$colon$colon$colon. Deprecated: """
-
-      true
+    // class
+    {
+      val html = files.get("com/example/p1/Clazz.html")
+        .map(page => { lazy val s = toHtml(page); () => s })
+      property("class") = html.map(_()).isDefined
+      def ifExists(op: String => Prop) = html.map(_()).fold(undecided)(op)
+      property("class:implicit conversion") =
+        ifExists(_ contains """<span class="modifier">implicit </span>""")
+      property("class:gt4s") = ifExists(_ contains """title="gt4s: $colon$colon"""")
+      property("class:gt4s of a deprecated method") =
+        ifExists(_ contains """title="gt4s: $colon$colon$colon$colon. Deprecated: """)
     }
 
     property("package") = files.contains("com/example/p1/index.html")

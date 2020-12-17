@@ -14,6 +14,8 @@ package scala
 package math
 
 import java.math.BigInteger
+
+import scala.annotation.nowarn
 import scala.language.implicitConversions
 import scala.collection.immutable.NumericRange
 
@@ -121,8 +123,8 @@ final class BigInt(val bigInteger: BigInteger)
     if (isValidLong) unifiedPrimitiveHashcode
     else bigInteger.##
 
-  /** Compares this BigInt with the specified value for equality.
-   */
+  /** Compares this BigInt with the specified value for equality. */
+  @nowarn("cat=other-non-cooperative-equals")
   override def equals(that: Any): Boolean = that match {
     case that: BigInt     => this equals that
     case that: BigDecimal => that equals this

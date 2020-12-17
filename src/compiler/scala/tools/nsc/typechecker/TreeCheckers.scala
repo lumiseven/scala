@@ -69,7 +69,7 @@ abstract class TreeCheckers extends Analyzer {
     case null      => ""
     case t: Tree   => t.shortClass
     case s: Symbol => s.shortSymbolClass
-    case x: AnyRef => shortClassOfInstance(x)
+    case x         => shortClassOfInstance(x.asInstanceOf[AnyRef])
   }
   private def nonPackageOwners(s: Symbol) = s.ownerChain drop 1 takeWhile (!_.hasPackageFlag)
   private def nonPackageOwnersPlusOne(s: Symbol) = nonPackageOwners(s) ::: (s.ownerChain dropWhile (!_.hasPackageFlag) take 1)
@@ -129,7 +129,7 @@ abstract class TreeCheckers extends Analyzer {
     def reportChanges(): Unit = {
       // new symbols
       if (newSyms.nonEmpty) {
-        informFn(newSyms.size + " new symbols.")
+        informFn("" + newSyms.size + " new symbols.")
         val toPrint = if (settings.debug) sortedNewSyms mkString " " else ""
 
         newSyms.clear()

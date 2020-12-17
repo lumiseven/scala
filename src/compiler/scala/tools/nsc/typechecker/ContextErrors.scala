@@ -13,8 +13,9 @@
 package scala.tools.nsc
 package typechecker
 
-import scala.reflect.internal.util.StringOps.{ countElementsAsString, countAsString }
+import scala.reflect.internal.util.StringOps.{countAsString, countElementsAsString}
 import java.lang.System.{lineSeparator => EOL}
+
 import scala.annotation.tailrec
 import scala.reflect.runtime.ReflectionUtils
 import scala.reflect.macros.runtime.AbortMacroException
@@ -257,9 +258,23 @@ trait ContextErrors {
       def ConstantAnnotationNeedsSingleArgumentList(constr: Tree, clazz: Symbol) =
         issueNormalTypeError(constr, s"$clazz needs to have exactly one argument list because it extends ConstantAnnotation")
 
+
+      private def formatTraitWithParams(parent: Symbol, paramSyms: List[Symbol]): String = {
+        val params = paramSyms.map(param => s"${param.name}: ${param.info}").mkString("(", ", ", ")")
+        s"$parent$params"
+      }
+
       // additional parentTypes errors
-      def ConstrArgsInParentWhichIsTraitError(arg: Tree, parent: Symbol) =
-        issueNormalTypeError(arg, s"$parent is a trait; does not take constructor arguments")
+      def ConstrArgsInParentWhichIsTraitError(arg: Tree, parent: Symbol) = {
+        val msg = parent.attachments.get[DottyParameterisedTrait] match {
+          case Some(holder) =>
+            val prettyParent = formatTraitWithParams(parent, holder.params)
+            s"$prettyParent is an illegal Scala 3 parameterized trait; so can not take constructor arguments"
+          case none => s"$parent is a trait; does not take constructor arguments"
+
+        }
+        issueNormalTypeError(arg, msg)
+      }
 
       def ConstrArgsInParentOfTraitError(arg: Tree, parent: Symbol) =
         issueNormalTypeError(arg, "parents of traits may not have parameters")
@@ -412,7 +427,7 @@ trait ContextErrors {
             }
             val semicolon = orEmpty(linePrecedes(qual, sel))(s"possible cause: maybe a semicolon is missing before `$nameString`?")
             val notAnyRef = orEmpty(ObjectClass.info.member(name).exists)(notAnyRefMessage(target))
-            val javaRules = orEmpty(owner.isJavaDefined && owner.isClass && !owner.isPackage) {
+            val javaRules = orEmpty(owner.isJavaDefined && owner.isClass && !owner.hasPackageFlag) {
               val (jtype, jmember) = cx.javaFindMember(target, name, _.isStaticMember)
               orEmpty(jmember != NoSymbol) {
                 val more = sm"""Static Java members belong to companion objects in Scala;
@@ -563,7 +578,7 @@ trait ContextErrors {
         NormalTypeError(tree, "expected annotation of type " + expected + ", found " + found)
 
       def MultipleArgumentListForAnnotationError(tree: Tree) =
-        NormalTypeError(tree, "multiple argument lists on Java annotation or subclass of ConstantAnnotation")
+        NormalTypeError(tree, "multiple argument lists on Java annotation")
 
       def UnknownAnnotationNameError(tree: Tree, name: Name) =
         NormalTypeError(tree, "unknown annotation argument name: " + name)
@@ -572,7 +587,7 @@ trait ContextErrors {
         NormalTypeError(tree, "duplicate value for annotation argument " + name)
 
       def ClassfileAnnotationsAsNamedArgsError(tree: Tree) =
-        NormalTypeError(tree, "arguments to Java annotations or subclasses of ConstantAnnotation have to be supplied as named arguments")
+        NormalTypeError(tree, "arguments to Java annotations have to be supplied as named arguments")
 
       def AnnotationMissingArgError(tree: Tree, annType: Type, sym: Symbol) =
         NormalTypeError(tree, "annotation " + annType.typeSymbol.fullName + " is missing argument " + sym.name)
@@ -704,6 +719,17 @@ trait ContextErrors {
         NormalTypeError(parent, "illegal inheritance; super"+superclazz+
                    "\n is not a subclass of the super"+parentSym+
                    "\n of the mixin " + mixin)
+
+      def ParentIsScala3TraitError(parent: Tree,
+                 parentSym: Symbol, params: List[Symbol], mixin: Symbol) = {
+        val parentWithCtor = formatTraitWithParams(parentSym, params)
+        val mixinMsg = {
+          if (mixin eq parentSym) " parameterized mixin "+mixin
+          else " parameterized super"+parentSym+"\n of the mixin "+mixin
+        }
+        NormalTypeError(parent, "illegal inheritance;"+mixinMsg+
+                  "\n is defined in Scala 3 as " + parentWithCtor)
+        }
 
       def ParentNotATraitMixinError(parent: Tree, mixin: Symbol) =
         NormalTypeError(parent, s"$mixin needs to be a trait to be mixed in")
@@ -1232,6 +1258,7 @@ trait ContextErrors {
               "type arguments " + argtypes.mkString("[", ",", "]") +
               " conform to the bounds of none of the overloaded alternatives of\n "+sym+
               ": "+sym.info
+            case x => throw new MatchError(x)
           }
         issueNormalTypeError(tree, msg)
         ()
@@ -1324,42 +1351,19 @@ trait ContextErrors {
 
       def SymbolValidationError(sym: Symbol, errKind: SymValidateErrors.Value): Unit = {
         val msg = errKind match {
-          case ImplicitConstr =>
-            "`implicit` modifier not allowed for constructors"
-
-          case ImplicitNotTermOrClass =>
-            "`implicit` modifier can be used only for values, variables, methods and classes"
-
-          case ImplicitAtToplevel =>
-            "`implicit` modifier cannot be used for top-level objects"
-
-          case OverrideClass =>
-            "`override` modifier not allowed for classes"
-
-          case SealedNonClass =>
-            "`sealed` modifier can be used only for classes"
-
-          case AbstractNonClass =>
-            "`abstract` modifier can be used only for classes; it should be omitted for abstract members"
-
-          case OverrideConstr =>
-            "`override` modifier not allowed for constructors"
-
-          case AbstractOverride =>
-            "`abstract override' modifier only allowed for members of traits"
-
-          case AbstractOverrideOnTypeMember =>
-            "`abstract override' modifier not allowed for type members"
-
-          case LazyAndEarlyInit =>
-            "`lazy` definitions may not be initialized early"
-
-          case ByNameParameter =>
-            "pass-by-name arguments not allowed for case class parameters"
-
-          case AbstractVar =>
-            "only traits and abstract classes can have declared but undefined members" + abstractVarMessage(sym)
-
+          case ImplicitConstr               => "`implicit` modifier not allowed for constructors"
+          case ImplicitNotTermOrClass       => "`implicit` modifier can be used only for values, variables, methods and classes"
+          case ImplicitAtToplevel           => "`implicit` modifier cannot be used for top-level objects"
+          case OverrideClass                => "`override` modifier not allowed for classes"
+          case SealedNonClass               => "`sealed` modifier can be used only for classes"
+          case AbstractNonClass             => "`abstract` modifier can be used only for classes; it should be omitted for abstract members"
+          case OverrideConstr               => "`override` modifier not allowed for constructors"
+          case AbstractOverride             => "`abstract override` modifier only allowed for members of traits"
+          case AbstractOverrideOnTypeMember => "`abstract override` modifier not allowed for type members"
+          case LazyAndEarlyInit             => "`lazy` definitions may not be initialized early"
+          case ByNameParameter              => "pass-by-name arguments not allowed for case class parameters"
+          case AbstractVar                  => "only traits and abstract classes can have declared but undefined members" + abstractVarMessage(sym)
+          case x                            => throw new MatchError(x)
         }
         issueSymbolTypeError(sym, msg)
       }
@@ -1380,10 +1384,9 @@ trait ContextErrors {
 
       def DuplicatesError(tree: Tree, name: Name, kind: DuplicatesErrorKinds.Value) = {
         val msg = kind match {
-          case RenamedTwice =>
-            "is renamed twice"
-          case AppearsTwice =>
-            "appears twice as a target of a renaming"
+          case RenamedTwice => "is renamed twice"
+          case AppearsTwice => "appears twice as a target of a renaming"
+          case x            => throw new MatchError(x)
         }
 
         issueNormalTypeError(tree, name.decode + " " + msg)
@@ -1406,7 +1409,7 @@ trait ContextErrors {
                 | $pre2 ${info2.sym.fullLocationString} of type ${info2.tpe}
                 | $trailer"""
         def viewMsg = {
-          val found :: req :: _ = pt.typeArgs
+          val found :: req :: _ = pt.typeArgs: @unchecked
           def explanation = {
             val sym = found.typeSymbol
             // Explain some common situations a bit more clearly. Some other

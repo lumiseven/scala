@@ -14,7 +14,7 @@ package scala
 package reflect
 package internal
 
-import scala.annotation.tailrec
+import scala.annotation.{nowarn, tailrec}
 import scala.collection.immutable.ListMap
 
 /** AnnotationInfo and its helpers */
@@ -77,6 +77,7 @@ trait AnnotationInfos extends api.Annotations { self: SymbolTable =>
    *
    * TODO: rename to `ConstantAnnotationArg`
    */
+  @nowarn("""cat=deprecation&origin=scala\.reflect\.api\.Annotations\.JavaArgumentApi""")
   sealed abstract class ClassfileAnnotArg extends Product with JavaArgumentApi
   type JavaArgument = ClassfileAnnotArg
   implicit val JavaArgumentTag = ClassTag[ClassfileAnnotArg](classOf[ClassfileAnnotArg])
@@ -109,10 +110,13 @@ trait AnnotationInfos extends api.Annotations { self: SymbolTable =>
     def lazily(lazyInfo: => AnnotationInfo) =
       new LazyAnnotationInfo(lazyInfo)
 
+    def lazily(lazySymbol: => Symbol, lazyInfo: => AnnotationInfo) =
+      new ExtraLazyAnnotationInfo(lazySymbol, lazyInfo)
+
     def apply(atp: Type, args: List[Tree], assocs: List[(Name, ClassfileAnnotArg)]): AnnotationInfo =
       new CompleteAnnotationInfo(atp, args, assocs)
 
-    def unapply(info: AnnotationInfo): Option[(Type, List[Tree], List[(Name, ClassfileAnnotArg)])] =
+    def unapply(info: AnnotationInfo): Some[(Type, List[Tree], List[(Name, ClassfileAnnotArg)])] =
       Some((info.atp, info.args, info.assocs))
 
     def mkFilter(category: Symbol, defaultRetention: Boolean)(ann: AnnotationInfo) =
@@ -153,7 +157,7 @@ trait AnnotationInfos extends api.Annotations { self: SymbolTable =>
   /** Symbol annotations parsed in `Namer` (typeCompleter of
    *  definitions) have to be lazy (#1782)
    */
-  final class LazyAnnotationInfo(lazyInfo: => AnnotationInfo) extends AnnotationInfo {
+  class LazyAnnotationInfo(lazyInfo: => AnnotationInfo) extends AnnotationInfo {
     private[this] var forced = false
     private lazy val forcedInfo = try lazyInfo finally forced = true
 
@@ -169,6 +173,11 @@ trait AnnotationInfos extends api.Annotations { self: SymbolTable =>
     override def pos: Position = if (forced) forcedInfo.pos else NoPosition
 
     override def completeInfo(): Unit = forcedInfo
+  }
+
+  final class ExtraLazyAnnotationInfo(sym: => Symbol, lazyInfo: => AnnotationInfo) extends LazyAnnotationInfo(lazyInfo) {
+    private[this] lazy val typeSymbol = sym
+    override def symbol: Symbol = typeSymbol
   }
 
   /** Typed information about an annotation. It can be attached to either
@@ -293,7 +302,7 @@ trait AnnotationInfos extends api.Annotations { self: SymbolTable =>
   object Annotation extends AnnotationExtractor {
     def apply(tpe: Type, scalaArgs: List[Tree], javaArgs: ListMap[Name, ClassfileAnnotArg]): Annotation =
       AnnotationInfo(tpe, scalaArgs, javaArgs.toList)
-    def unapply(annotation: Annotation): Option[(Type, List[Tree], ListMap[Name, ClassfileAnnotArg])] =
+    def unapply(annotation: Annotation): Some[(Type, List[Tree], ListMap[Name, ClassfileAnnotArg])] =
       Some((annotation.tpe, annotation.scalaArgs, annotation.javaArgs))
   }
   implicit val AnnotationTag = ClassTag[AnnotationInfo](classOf[AnnotationInfo])
@@ -366,19 +375,12 @@ trait AnnotationInfos extends api.Annotations { self: SymbolTable =>
     * as well as “new-style” `@throws[Exception]("cause")` annotations.
     */
   object ThrownException {
-    def unapply(ann: AnnotationInfo): Option[Type] = {
-      ann match {
-        case AnnotationInfo(tpe, _, _) if tpe.typeSymbol != ThrowsClass =>
-          None
-        // old-style: @throws(classOf[Exception]) (which is throws[T](classOf[Exception]))
-        case AnnotationInfo(_, List(Literal(Constant(tpe: Type))), _) =>
-          Some(tpe)
-        // new-style: @throws[Exception], @throws[Exception]("cause")
-        case AnnotationInfo(TypeRef(_, _, arg :: _), _, _) =>
-          Some(arg)
-        case AnnotationInfo(TypeRef(_, _, Nil), _, _) =>
-          Some(ThrowableTpe)
-      }
+    def unapply(ann: AnnotationInfo): Option[Type] = ann match {
+      case AnnotationInfo(tpe, _, _) if tpe.typeSymbol != ThrowsClass => None
+      case AnnotationInfo(_, List(Literal(Constant(tpe: Type))), _)   => Some(tpe) // old-style
+      case AnnotationInfo(TypeRef(_, _, arg :: _), _, _)              => Some(arg) // new-style
+      case AnnotationInfo(TypeRef(_, _, Nil), _, _)                   => Some(ThrowableTpe)
+      case _                                                          => None
     }
   }
 }

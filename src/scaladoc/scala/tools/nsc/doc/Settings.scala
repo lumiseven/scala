@@ -15,12 +15,15 @@ package doc
 
 import java.io.File
 
+import scala.annotation.nowarn
 import scala.tools.nsc.settings.{DefaultPathFactory, PathFactory}
 
 /** An extended version of compiler settings, with additional Scaladoc-specific options.
   * @param error A function that prints a string to the appropriate error stream
   * @param printMsg A function that prints the string, without any extra boilerplate of error */
 class Settings(error: String => Unit, val printMsg: String => Unit = println(_), pathFactory: PathFactory = DefaultPathFactory) extends scala.tools.nsc.Settings(error, pathFactory) {
+  // https://github.com/tkawachi/sbt-doctest depends on this constructor being available
+  def this(error: String => Unit, printMsg: String => Unit) = this(error, printMsg, DefaultPathFactory)
 
   // TODO 2.13 Remove
   private def removalIn213 = "This flag is scheduled for removal in 2.13. If you have a case where you need this flag then please report a bug."
@@ -347,6 +350,7 @@ class Settings(error: String => Unit, val printMsg: String => Unit = println(_),
     /** Dirty, dirty, dirty hack: the value params conversions can all kick in -- and they are disambiguated by priority
      *  but showing priority in scaladoc would make no sense -- so we have to manually remove the conversions that we
      *  know will never get a chance to kick in. Anyway, DIRTY DIRTY DIRTY! */
+    @nowarn("cat=lint-nonlocal-return")
     def valueClassFilter(value: String, conversionName: String): Boolean = {
       val valueName = value.toLowerCase
       val otherValues = valueClassList.filterNot(_ == valueName)

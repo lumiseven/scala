@@ -14,7 +14,7 @@ package scala
 package reflect
 package internal
 
-import scala.annotation.{meta, migration, tailrec}
+import scala.annotation.{meta, migration, nowarn, tailrec}
 import scala.collection.mutable
 import Flags._
 import scala.reflect.api.{Universe => ApiUniverse}
@@ -35,13 +35,13 @@ trait Definitions extends api.StandardDefinitions {
 
   private def enterNewClass(owner: Symbol, name: TypeName, parents: List[Type], flags: Long = 0L): ClassSymbol = {
     val clazz = owner.newClassSymbol(name, NoPosition, flags)
-    clazz.setInfoAndEnter(ClassInfoType(parents, newScope, clazz)).markAllCompleted
+    clazz.setInfoAndEnter(ClassInfoType(parents, newScope, clazz)).markAllCompleted()
   }
   private def newMethod(owner: Symbol, name: TermName, formals: List[Type], mkMeth: List[TermSymbol] => Type, flags: Long): MethodSymbol = {
     val msym   = owner.newMethod(name.encode, NoPosition, flags)
     val params = msym.newSyntheticValueParams(formals)
     val info = mkMeth(params)
-    msym.setInfo(info).markAllCompleted
+    msym.setInfo(info).markAllCompleted()
   }
   private def enterNewMethod(owner: Symbol, name: TermName, formals: List[Type], restpe: Type, flags: Long = 0L): MethodSymbol =
     owner.info.decls enter newMethod(owner, name, formals, MethodType(_, restpe), flags)
@@ -277,13 +277,13 @@ trait Definitions extends api.StandardDefinitions {
           assert(parents.head.typeSymbol == ObjectClass, parents)
           ClassInfoType(AnyTpe :: parents.tail, decls, clazz)
         }
-      case PolyType(tparams, restpe) =>
-        PolyType(tparams, fixupAsAnyTrait(restpe))
+      case PolyType(tparams, restpe) => PolyType(tparams, fixupAsAnyTrait(restpe))
+      case _                         => throw new MatchError(tpe)
     }
 
     // top types
-    lazy val AnyClass    = enterNewClass(ScalaPackageClass, tpnme.Any, Nil, ABSTRACT).markAllCompleted
-    lazy val AnyRefClass = newAlias(ScalaPackageClass, tpnme.AnyRef, ObjectTpe).markAllCompleted
+    lazy val AnyClass    = enterNewClass(ScalaPackageClass, tpnme.Any, Nil, ABSTRACT).markAllCompleted()
+    lazy val AnyRefClass = newAlias(ScalaPackageClass, tpnme.AnyRef, ObjectTpe).markAllCompleted()
     lazy val ObjectClass = getRequiredClass("java.lang.Object")
 
     // Cached types for core monomorphic classes
@@ -318,7 +318,7 @@ trait Definitions extends api.StandardDefinitions {
       val anyval    = enterNewClass(ScalaPackageClass, tpnme.AnyVal, AnyTpe :: Nil, ABSTRACT)
       val av_constr = anyval.newClassConstructor(NoPosition)
       anyval.info.decls enter av_constr
-      anyval.markAllCompleted
+      anyval.markAllCompleted()
     }).asInstanceOf[ClassSymbol]
       def AnyVal_getClass = getMemberMethod(AnyValClass, nme.getClass_)
 
@@ -330,7 +330,7 @@ trait Definitions extends api.StandardDefinitions {
       locally {
         this initFlags ABSTRACT | FINAL
         this setInfoAndEnter ClassInfoType(List(parent.tpe), newScope, this)
-        this.markAllCompleted
+        this.markAllCompleted()
       }
       final override def isBottomClass = true
       final override def isThreadsafe(purpose: SymbolOps): Boolean = true
@@ -397,20 +397,20 @@ trait Definitions extends api.StandardDefinitions {
          def Symbol_apply       = getMemberMethod(SymbolModule, nme.apply)
 
     // classes with special meanings
-    lazy val ScalaNumberClass           = requiredClass[scala.math.ScalaNumber]
-    lazy val DelayedInitClass           = requiredClass[scala.DelayedInit]
-      def delayedInitMethod = getMemberMethod(DelayedInitClass, nme.delayedInit)
+    lazy val ScalaNumberClass  = requiredClass[scala.math.ScalaNumber]
+    lazy val DelayedInitClass  = requiredClass[scala.DelayedInit]: @nowarn("cat=deprecation")
+         def delayedInitMethod = getMemberMethod(DelayedInitClass, nme.delayedInit)
 
-    lazy val TypeConstraintClass   = requiredClass[scala.annotation.TypeConstraint]
-    lazy val SingletonClass        = enterNewClass(ScalaPackageClass, tpnme.Singleton, AnyTpe :: Nil, ABSTRACT | TRAIT | FINAL).markAllCompleted
+    lazy val TypeConstraintClass     = requiredClass[scala.annotation.TypeConstraint]
+    lazy val SingletonClass          = enterNewClass(ScalaPackageClass, tpnme.Singleton, AnyTpe :: Nil, ABSTRACT | TRAIT | FINAL).markAllCompleted()
     lazy val ListOfSingletonClassTpe = SingletonClass.tpe :: Nil
-    lazy val SerializableClass     = requiredClass[java.io.Serializable] modifyInfo fixupAsAnyTrait
-    lazy val ComparableClass       = requiredClass[java.lang.Comparable[_]] modifyInfo fixupAsAnyTrait
-    lazy val JavaCloneableClass    = requiredClass[java.lang.Cloneable] modifyInfo fixupAsAnyTrait
-    lazy val JavaNumberClass       = requiredClass[java.lang.Number]
-    lazy val JavaEnumClass         = requiredClass[java.lang.Enum[_]]
-    lazy val JavaUtilMap           = requiredClass[java.util.Map[_, _]]
-    lazy val JavaUtilHashMap       = requiredClass[java.util.HashMap[_, _]]
+    lazy val SerializableClass       = requiredClass[java.io.Serializable] modifyInfo fixupAsAnyTrait
+    lazy val ComparableClass         = requiredClass[java.lang.Comparable[_]] modifyInfo fixupAsAnyTrait
+    lazy val JavaCloneableClass      = requiredClass[java.lang.Cloneable] modifyInfo fixupAsAnyTrait
+    lazy val JavaNumberClass         = requiredClass[java.lang.Number]
+    lazy val JavaEnumClass           = requiredClass[java.lang.Enum[_]]
+    lazy val JavaUtilMap             = requiredClass[java.util.Map[_, _]]
+    lazy val JavaUtilHashMap         = requiredClass[java.util.HashMap[_, _]]
 
     lazy val ByNameParamClass       = specialPolyClass(tpnme.BYNAME_PARAM_CLASS_NAME, COVARIANT)(_ => AnyTpe)
     lazy val JavaRepeatedParamClass = specialPolyClass(tpnme.JAVA_REPEATED_PARAM_CLASS_NAME, COVARIANT)(tparam => arrayType(tparam.tpe))
@@ -477,6 +477,9 @@ trait Definitions extends api.StandardDefinitions {
              def List_cons              = getMemberMethod(ListClass, nme.CONS)
     @migration("SeqClass now refers to scala.collection.immutable.Seq", "2.13.0")
     lazy val SeqClass               = requiredClass[scala.collection.immutable.Seq[_]]
+    lazy val SeqFactoryClass        = requiredModule[scala.collection.SeqFactory.type]
+    lazy val UnapplySeqWrapperClass = getTypeMember(SeqFactoryClass, tpnme.UnapplySeqWrapper)
+
     lazy val JavaStringBuilderClass = requiredClass[java.lang.StringBuilder]
     lazy val JavaStringBufferClass  = requiredClass[java.lang.StringBuffer]
     lazy val JavaCharSequenceClass  = requiredClass[java.lang.CharSequence]
@@ -569,6 +572,36 @@ trait Definitions extends api.StandardDefinitions {
          def MacroContextWeakTypeTagClass = BlackboxContextClass.map(sym => getTypeMember(sym, tpnme.WeakTypeTag))
          def MacroContextTreeType         = BlackboxContextClass.map(sym => getTypeMember(sym, tpnme.Tree))
     lazy val MacroImplAnnotation          = requiredClass[scala.reflect.macros.internal.macroImpl]
+
+    /**Implementation of a class that is identical to `scala.reflect.macros.internal.macroImpl`,
+     * but only exists at compile time
+     */
+    lazy val MacroImplLocationAnnotation = {
+      val internalPkg       = MacroImplAnnotation.owner.suchThat(_.isPackageClass)
+      val MacroImplLocation = internalPkg.newClassSymbol(tpnme.macroImplLocation, NoPosition)
+      MacroImplLocation.setPrivateWithin(ScalaPackage)
+      MacroImplLocation.setInfoAndEnter(ClassInfoType(AnnotationClass.tpe :: Nil, newScope, MacroImplLocation))
+      // getter
+      MacroImplLocation.newMethod(
+        name     = nme.unpickledMacroImpl,
+        newFlags = STABLE | ACCESSOR | PARAMACCESSOR
+      ).setInfoAndEnter(internal.nullaryMethodType(AnyTpe)).markAllCompleted()
+      // field
+      MacroImplLocation.newValue(
+        name     = nme.unpickledMacroImpl,
+        newFlags = PRIVATE | LOCAL | PARAMACCESSOR
+      ).setInfoAndEnter(AnyTpe).markAllCompleted()
+      // ctor
+      val ctor  = MacroImplLocation.newConstructor(NoPosition)
+      val param = ctor.newValueParameter(nme.unpickledMacroImpl).setInfo(AnyTpe)
+      ctor.setInfoAndEnter(MethodType(param :: Nil, MacroImplLocation.tpe)).markAllCompleted()
+      MacroImplLocation.addAnnotation(
+        sym = CompileTimeOnlyAttr,
+        arg = Literal(Constant(
+          s"illegal reference to $MacroImplLocation, it is an implementation detail of unpickling TASTy"))
+      )
+      MacroImplLocation.markAllCompleted()
+    }
 
     lazy val StringContextClass           = requiredClass[scala.StringContext]
     lazy val StringContextModule          = requiredModule[scala.StringContext.type]
@@ -908,7 +941,7 @@ trait Definitions extends api.StandardDefinitions {
         volatileRecursions += 1
         try safeIsVolatile finally volatileRecursions -= 1
       }
-      /** A refined type P1 with ... with Pn { decls } is volatile if
+      /*  A refined type P1 with ... with Pn { decls } is volatile if
        *  one of the parent types Pi is an abstract type, and
        *  either i > 1, or decls or a following parent Pj, j > 1, contributes
        *  an abstract member.
@@ -918,7 +951,7 @@ trait Definitions extends api.StandardDefinitions {
        *  a member of the whole type.
        */
       def isVolatileRefinedType: Boolean = {
-        val RefinedType(parents, decls)         = tp
+        val RefinedType(parents, decls)         = (tp: @unchecked)
         def isVisibleDeferred(m: Symbol)        = m.isDeferred && ((tp nonPrivateMember m.name).alternatives contains m)
         def contributesAbstractMembers(p: Type) = p.deferredMembers exists isVisibleDeferred
         def dropConcreteParents                 = parents dropWhile (p => !p.typeSymbol.isAbstractType)
@@ -978,7 +1011,7 @@ trait Definitions extends api.StandardDefinitions {
       if (doSam && isNonRefinementClassType(unwrapToClass(tp))) { // TODO: is this really faster than computing tpSym below? how about just `tp.typeSymbol.isClass` (and !tpSym.isRefinementClass)?
         // look at erased type because we (only) care about what ends up in bytecode
         // (e.g., an alias type is fine as long as is compiles to a single-abstract-method)
-        val tpSym = erasure.javaErasure(tp).typeSymbol
+        val tpSym: Symbol = erasure.javaErasure(tp).typeSymbol
 
         def compute: Symbol = {
           if (tpSym.exists && tpSym.isClass && !(tpSym hasFlag (FINAL | SEALED))
@@ -1279,6 +1312,13 @@ trait Definitions extends api.StandardDefinitions {
     lazy val uncheckedStableClass       = requiredClass[scala.annotation.unchecked.uncheckedStable]
     lazy val uncheckedVarianceClass     = requiredClass[scala.annotation.unchecked.uncheckedVariance]
 
+    // Tasty Unpickling Helpers - only access when Scala 3 library is expected to be available
+    lazy val ChildAnnotationClass        = getClassIfDefined("scala.annotation.internal.Child")
+    lazy val RepeatedAnnotationClass     = getClassIfDefined("scala.annotation.internal.Repeated")
+    lazy val TargetNameAnnotationClass   = getClassIfDefined("scala.annotation.targetName")
+    lazy val StaticMethodAnnotationClass = getClassIfDefined("scala.annotation.static")
+    lazy val PolyFunctionClass           = getClassIfDefined("scala.PolyFunction")
+
     lazy val BeanPropertyAttr           = requiredClass[scala.beans.BeanProperty]
     lazy val BooleanBeanPropertyAttr    = requiredClass[scala.beans.BooleanBeanProperty]
     lazy val CompileTimeOnlyAttr        = getClassIfDefined("scala.annotation.compileTimeOnly")
@@ -1465,7 +1505,7 @@ trait Definitions extends api.StandardDefinitions {
       val tparam  = clazz.newSyntheticTypeParam("T0", flags)
       val parents = List(AnyRefTpe, parentFn(tparam))
 
-      clazz.setInfo(GenPolyType(List(tparam), ClassInfoType(parents, newScope, clazz))).markAllCompleted
+      clazz.setInfo(GenPolyType(List(tparam), ClassInfoType(parents, newScope, clazz))).markAllCompleted()
     }
 
     def newPolyMethod(typeParamCount: Int, owner: Symbol, name: TermName, flags: Long)(createFn: PolyMethodCreator): MethodSymbol = {
@@ -1476,7 +1516,7 @@ trait Definitions extends api.StandardDefinitions {
         case (_, restpe)             => NullaryMethodType(restpe)
       }
 
-      msym.setInfo(genPolyType(tparams, mtpe)).markAllCompleted
+      msym.setInfo(genPolyType(tparams, mtpe)).markAllCompleted()
     }
     def enterNewPolyMethod(typeParamCount: Int, owner: Symbol, name: TermName, flags: Long)(createFn: PolyMethodCreator): MethodSymbol = {
       val m = newPolyMethod(typeParamCount, owner, name, flags)(createFn)

@@ -13,7 +13,7 @@
 package scala.collection
 package mutable
 
-import scala.annotation.tailrec
+import scala.annotation.{nowarn, tailrec}
 import scala.collection.Stepper.EfficientSplit
 import scala.collection.generic.DefaultSerializationProxy
 import scala.util.hashing.MurmurHash3
@@ -31,7 +31,7 @@ import scala.util.hashing.MurmurHash3
   *  @define mayNotTerminateInf
   *  @define willNotTerminateInf
   */
-@deprecatedInheritance("HashMap wil be made final; use .withDefault for the common use case of computing a default value", "2.13.0")
+@deprecatedInheritance("HashMap will be made final; use .withDefault for the common use case of computing a default value", "2.13.0")
 class HashMap[K, V](initialCapacity: Int, loadFactor: Double)
   extends AbstractMap[K, V]
     with MapOps[K, V, HashMap, HashMap[K, V]]
@@ -161,7 +161,13 @@ class HashMap[K, V](initialCapacity: Int, loadFactor: Double)
           else table(indexedHash) = foundNode.next
           contentSize -= 1
 
-        case (None, Some(value)) => put0(key, value, false, hash, indexedHash)
+        case (None, Some(value)) =>
+          val newIndexedHash =
+            if (contentSize + 1 >= threshold) {
+              growTable(table.length * 2)
+              index(hash)
+            } else indexedHash
+          put0(key, value, false, hash, newIndexedHash)
 
         case (Some(_), Some(newValue)) => foundNode.value = newValue
       }
@@ -353,6 +359,8 @@ class HashMap[K, V](initialCapacity: Int, loadFactor: Double)
   }
 
   private[this] def growTable(newlen: Int) = {
+    if (newlen < 0)
+      throw new RuntimeException(s"new HashMap table size $newlen exceeds maximum")
     var oldlen = table.length
     threshold = newThreshold(newlen)
     if(size == 0) table = new Array(newlen)
@@ -536,6 +544,7 @@ class HashMap[K, V](initialCapacity: Int, loadFactor: Double)
 
   override def mapFactory: MapFactory[HashMap] = HashMap
 
+  @nowarn("""cat=deprecation&origin=scala\.collection\.Iterable\.stringPrefix""")
   override protected[this] def stringPrefix = "HashMap"
 
   override def hashCode: Int = {

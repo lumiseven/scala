@@ -108,14 +108,14 @@ trait Contexts { self: Analyzer =>
 
   var lastAccessCheckDetails: String = ""
 
-  val rootImportsCached = perRunCaches.newMap[CompilationUnit, List[Symbol]]
+  val rootImportsCached = perRunCaches.newMap[CompilationUnit, List[Symbol]]()
 
-  val excludedRootImportsCached = perRunCaches.newMap[CompilationUnit, List[Symbol]]
+  val excludedRootImportsCached = perRunCaches.newMap[CompilationUnit, List[Symbol]]()
 
   // register an import for the narrow purpose of excluding root imports of predef modules
   def registerImport(ctx: Context, imp: Import): Unit = {
     val sym = imp.expr.symbol
-    if (sym != null && !sym.isPackage && ctx.enclosingNonImportContext.owner.isPackage && rootImports(ctx.unit).contains(sym)) {
+    if (sym != null && !sym.hasPackageFlag && ctx.enclosingNonImportContext.owner.hasPackageFlag && rootImports(ctx.unit).contains(sym)) {
       var current = excludedRootImportsCached.get(ctx.unit).getOrElse(Nil)
       current = sym :: current
       excludedRootImportsCached += ctx.unit -> current
@@ -712,7 +712,7 @@ trait Contexts { self: Analyzer =>
         c(TypeConstructorAllowed) = false
 
       registerContext(c.asInstanceOf[analyzer.Context])
-      debuglog("[context] ++ " + c.unit + " / " + (if (tree == null) "" else tree.summaryString))
+      debuglog(s"[context] ++ ${c.unit} / ${if (tree == null) "" else tree.summaryString}")
       c
     }
 
@@ -853,7 +853,7 @@ trait Contexts { self: Analyzer =>
       case x: Import => "" + x
       case Template(parents, `noSelfType`, body) =>
         val pstr = if ((parents eq null) || parents.isEmpty) "Nil" else parents mkString " "
-        val bstr = if (body eq null) "" else body.length + " stats"
+        val bstr = if (body eq null) "" else "" + body.length + " stats"
         s"""Template($pstr, _, $bstr)"""
       case x => s"${tree.shortClass}${treeIdString}:${treeTruncated}"
     }
@@ -1317,7 +1317,7 @@ trait Contexts { self: Analyzer =>
       val preSym = pre.typeSymbol
       if (sym.exists || preSym.isPackageClass || !preSym.isClass) (pre, sym)
       else {
-        // In Java code, static innner classes, which we model as members of the companion object,
+        // In Java code, static inner classes, which we model as members of the companion object,
         // can be referenced from an ident in a subclass or by a selection prefixed by the subclass.
         val toSearch = if (preSym.isModuleClass) companionSymbolOf(pre.typeSymbol.sourceModule, this).baseClasses else preSym.baseClasses
         toSearch.iterator.map { bc =>
@@ -1499,26 +1499,41 @@ trait Contexts { self: Analyzer =>
        *     as the reference, have lowest precedence. Also "root" imports added implicitly.
        */
       def foreignDefined = defSym.exists && thisContext.isPackageOwnedInDifferentUnit(defSym)  // SI-2458
-      // can an import at this depth possibly shadow the definition found in scope if any?
-      def importCanShadowAtDepth(imp: ImportInfo) = imp.depth > symbolDepth || (
-        if (thisContext.unit.isJava) imp.depth == symbolDepth && imp.isExplicitImport(name)
-        else foreignDefined
-      )
 
-      while (!impSym.exists && importCursor.imp1Exists && importCanShadowAtDepth(importCursor.imp1)) {
-        val (sel, sym) = lookupImport(imp1, requireExplicit = false)
-        impSel = sel
-        impSym = sym
-        if (!impSym.exists)
-          importCursor.advanceImp1Imp2()
+      // Find the first candidate import
+      def advanceCursorToNextImport(): Unit = {
+        val defIsLevel4 = foreignDefined
+        // can the import at this depth compete with the definition?
+        // If not, we can stop inspecting outer scopes (including more imports).
+        // A competing import can either shadow the definition or render it ambiguous.
+        //
+        @inline def importCanShadowAtDepth(imp: ImportInfo) = {
+          @inline def importCompetesWithDefinition =
+            if (thisContext.unit.isJava) imp.depth == symbolDepth && defIsLevel4
+            else defIsLevel4
+          imp.depth > symbolDepth || importCompetesWithDefinition
+        }
+
+        while (!impSym.exists && importCursor.imp1Exists && importCanShadowAtDepth(importCursor.imp1)) {
+          val javaRule = thisContext.unit.isJava && defIsLevel4
+          val (sel, sym) = lookupImport(imp1, requireExplicit = javaRule)
+          impSel = sel
+          impSym = sym
+          if (!impSym.exists)
+            importCursor.advanceImp1Imp2()
+        }
       }
+      advanceCursorToNextImport()
 
       val preferDef: Boolean = defSym.exists && (!impSym.exists || {
         // 4) root imported symbols have same (lowest) precedence as package-owned symbols in different compilation units.
         if (imp1.depth < symbolDepth && imp1.isRootImport && foreignDefined)
           true
         // 4) imported symbols have higher precedence than package-owned symbols in different compilation units.
-        else if (imp1.depth >= symbolDepth && foreignDefined)
+        //    except that in Java, the import must be "explicit" (level 2)
+        else if (thisContext.unit.isJava && imp1.depth == symbolDepth && foreignDefined)
+          !importCursor.imp1Explicit
+        else if (!thisContext.unit.isJava && imp1.depth >= symbolDepth && foreignDefined)
           false
         // Defined symbols take precedence over erroneous imports.
         else if (impSym.isError || impSym.name == nme.CONSTRUCTOR)
@@ -1531,8 +1546,8 @@ trait Contexts { self: Analyzer =>
           return ambiguousDefnAndImport(defSym.alternatives.head.owner, imp1)
       })
 
-      // If the defSym is at 4, and there is a def at 1 in scope, then the reference is ambiguous.
-      if (foreignDefined && !defSym.isPackage) {
+      // If the defSym is at 4, and there is a def at 1 in scope due to packaging, then the reference is ambiguous.
+      if (foreignDefined && !defSym.hasPackageFlag && !thisContext.unit.isJava) {
         val defSym0 = defSym
         val pre0    = pre
         val cx0     = cx
@@ -1919,7 +1934,7 @@ trait Contexts { self: Analyzer =>
     def sameDepth: Boolean = imp1.depth == imp2.depth
 
     private def imp2Exists = imp2Ctx.importOrNull != null
-    private def imp1Explicit = imp1 isExplicitImport name
+    def imp1Explicit = imp1 isExplicitImport name
     private def imp2Explicit = imp2 isExplicitImport name
   }
 

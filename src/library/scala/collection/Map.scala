@@ -13,9 +13,9 @@
 package scala
 package collection
 
+import scala.annotation.nowarn
 import scala.collection.generic.DefaultSerializable
 import scala.collection.mutable.StringBuilder
-import scala.runtime.AbstractFunction1
 import scala.util.hashing.MurmurHash3
 
 /** Base Map type */
@@ -29,25 +29,14 @@ trait Map[K, +V]
 
   def canEqual(that: Any): Boolean = true
 
-  override def equals(o: Any): Boolean = o match {
-    case that: Map[K, _] =>
-      (this eq that) ||
-      (that canEqual this) &&
-      (this.size == that.size) && {
-        try {
-          val checker = new AbstractFunction1[(K, V),Boolean] {
-            override def apply(kv: (K,V)): Boolean = {
-              that.getOrElse(kv._1, Map.DefaultSentinel) == kv._2
-            }
-          }
-          this forall checker
-        } catch {
-          case _: ClassCastException => false
-        }
-      }
-    case _ =>
-      false
-  }
+  override def equals(o: Any): Boolean =
+    (this eq o.asInstanceOf[AnyRef]) || (o match {
+      case map: Map[K, _] if map.canEqual(this) =>
+        (this.size == map.size) &&
+          this.forall(kv => map.getOrElse(kv._1, Map.DefaultSentinelFn()) == kv._2)
+      case _ =>
+        false
+    })
 
   override def hashCode(): Int = MurmurHash3.mapHash(toIterable)
 
@@ -57,6 +46,7 @@ trait Map[K, +V]
   @deprecated("Use -- or removedAll on an immutable Map", "2.13.0")
   def - (key1: K, key2: K, keys: K*): Map[K, V]
 
+  @nowarn("""cat=deprecation&origin=scala\.collection\.Iterable\.stringPrefix""")
   override protected[this] def stringPrefix: String = "Map"
 
   override def toString(): String = super[Iterable].toString() // Because `Function1` overrides `toString` too
@@ -375,6 +365,7 @@ object MapOps {
 @SerialVersionUID(3L)
 object Map extends MapFactory.Delegate[Map](immutable.Map) {
   private val DefaultSentinel: AnyRef = new AnyRef
+  private val DefaultSentinelFn: () => AnyRef = () => DefaultSentinel
 }
 
 /** Explicit instantiation of the `Map` trait to reduce class file size in subclasses. */

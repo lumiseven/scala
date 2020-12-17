@@ -137,7 +137,7 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
 
       enclosingPackage.info.decls.foreach { sym =>
         if(sourceFile == sym.sourceFile) {
-          sym.rawInfo.forceDirectSuperclasses
+          sym.rawInfo.forceDirectSuperclasses()
         }
       }
 
@@ -310,7 +310,6 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
         rawFlagString
       )
     )
-
 // ------ creators -------------------------------------------------------------------
 
     final def newValue(name: TermName, pos: Position = NoPosition, newFlags: Long = 0L): TermSymbol =
@@ -961,6 +960,7 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
 
     /** Is this symbol a synthetic apply or unapply method in a companion object of a case class? */
     // xeno-by: why this obscure use of the CASE flag? why not simply compare name with nme.apply and nme.unapply?
+    // dnw: "fixed in Dotty"?  In Scala 3 unapply methods don't use the CASE flag.
     final def isCaseApplyOrUnapply =
       isMethod && isCase && isSynthetic
 
@@ -1367,6 +1367,19 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
     protected def createValueMemberSymbol(name: TermName, pos: Position, newFlags: Long): TermSymbol =
       new TermSymbol(this, pos, name) initFlags newFlags
 
+    final def newExtensionMethodSymbol(companion: Symbol, pos: Position): MethodSymbol = {
+      val extensionMeth = (
+        companion.moduleClass.newMethod(this.name.extensionName, pos, this.flags & ~OVERRIDE & ~PROTECTED & ~PRIVATE & ~LOCAL | FINAL)
+          setAnnotations this.annotations
+      )
+      defineOriginalOwner(extensionMeth, this.owner)
+      // @strictfp on class means strictfp on all methods, but `setAnnotations` won't copy it
+      if (this.isStrictFP && !extensionMeth.hasAnnotation(ScalaStrictFPAttr))
+        extensionMeth.addAnnotation(ScalaStrictFPAttr)
+      this.removeAnnotation(TailrecClass) // it's on the extension method, now.
+      companion.info.decls.enter(extensionMeth)
+    }
+
     final def newTermSymbol(name: TermName, pos: Position = NoPosition, newFlags: Long = 0L): TermSymbol = {
       // Package before Module, Module before Method, or we might grab the wrong guy.
       if ((newFlags & PACKAGE) != 0)
@@ -1709,7 +1722,7 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
     }
     def maybeInitialize = {
       try   { initialize ; true }
-      catch { case _: CyclicReference => debuglog("Hit cycle in maybeInitialize of $this") ; false }
+      catch { case _: CyclicReference => debuglog(s"Hit cycle in maybeInitialize of $this") ; false }
     }
 
     /** Was symbol's type updated during given phase? */
@@ -1854,6 +1867,7 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
       info match {
         case ci @ ClassInfoType(_, _, _) =>
           setInfo(ci.copy(parents = ci.parents :+ SerializableTpe))
+          invalidateCaches(ci.typeSymbol.typeOfThis, ci.typeSymbol :: Nil)
         case i =>
           abort("Only ClassInfoTypes can be made serializable: "+ i)
       }
@@ -2043,7 +2057,7 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
           setInfo (this.info cloneInfo clone)
           setAnnotations this.annotations
       )
-      assert(clone.attachments.isEmpty)
+      assert(clone.attachments.isEmpty, "cloned symbol cannot have attachments")
       clone.setAttachments(this.attachments.cloneAttachments)
       if (clone.thisSym != clone)
         clone.typeOfThis = (clone.typeOfThis cloneInfo clone)
@@ -2116,18 +2130,26 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
       // handling of non-public parameters seems to change the order (see scala/bug#7035.)
       //
       // Luckily, the constrParamAccessors are still sorted properly, so sort the field-accessors using them
-      // (need to undo name-mangling, including the sneaky trailing whitespace)
+      // (need to undo name-mangling, including the sneaky trailing whitespace, and match longest first)
       //
       // The slightly more principled approach of using the paramss of the
       // primary constructor leads to cycles in, for example, pos/t5084.scala.
       val primaryNames = constrParamAccessors map (_.name.dropLocal)
       def nameStartsWithOrigDollar(name: Name, prefix: Name) =
         name.startsWith(prefix) && name.length > prefix.length + 1 && name.charAt(prefix.length) == '$'
-      caseFieldAccessorsUnsorted.sortBy { acc =>
-        primaryNames indexWhere { orig =>
-          (acc.name == orig) || nameStartsWithOrigDollar(acc.name, orig)
+
+      def rec(remaningAccessors: List[Symbol], foundAccessors: List[(Symbol, Int)], remainingNames: List[(Name, Int)]): List[Symbol] = {
+        remaningAccessors match {
+          case Nil => foundAccessors.sortBy(_._2).map(_._1)
+          case acc :: tail => {
+            val i = remainingNames.collectFirst { case (name, i) if acc.name == name || nameStartsWithOrigDollar(acc.name, name) => i}
+            rec(tail, (acc, i.get) :: foundAccessors, remainingNames.filterNot { case (_, ii) => Some(ii) == i} )
+          }
         }
       }
+
+      rec(caseFieldAccessorsUnsorted.sortBy(s => -s.name.length), Nil, primaryNames.zipWithIndex.sortBy{ case (n, _) => -n.length})
+
     }
     private final def caseFieldAccessorsUnsorted: List[Symbol] = info.decls.toList.filter(_.isCaseAccessorMethod)
 
@@ -3880,7 +3902,7 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
     markFlagsCompleted(sym1)(mask)
     markFlagsCompleted(sym2)(mask)
   }
-  final def markAllCompleted(sym: Symbol): Unit = forEachRelevantSymbol(sym, _.markAllCompleted)
+  final def markAllCompleted(sym: Symbol): Unit = forEachRelevantSymbol(sym, _.markAllCompleted())
   final def markAllCompleted(sym1: Symbol, sym2: Symbol): Unit = {
     markAllCompleted(sym1)
     markAllCompleted(sym2)

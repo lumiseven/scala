@@ -17,7 +17,7 @@ package tpe
 
 import scala.collection.{immutable, mutable}
 import Flags._
-import scala.annotation.tailrec
+import scala.annotation.{nowarn, tailrec}
 import Variance._
 import scala.collection.mutable.ListBuffer
 
@@ -169,6 +169,7 @@ private[internal] trait TypeMaps {
       else args1
     }
 
+    @nowarn("cat=lint-nonlocal-return")
     def mapOver(tree: Tree): Tree =
       mapOver(tree, () => return UnmappableTree)
 
@@ -501,8 +502,8 @@ private[internal] trait TypeMaps {
       *  @param   rhs    a type application constructed from `clazz`
       */
     private def correspondingTypeArgument(lhs: Type, rhs: Type): Type = {
-      val TypeRef(_, lhsSym, lhsArgs) = lhs
-      val TypeRef(_, rhsSym, rhsArgs) = rhs
+      val TypeRef(_, lhsSym, lhsArgs) = lhs: @unchecked
+      val TypeRef(_, rhsSym, rhsArgs) = rhs: @unchecked
       require(lhsSym.owner == rhsSym, s"$lhsSym is not a type parameter of $rhsSym")
 
       // Find the type parameter position; we'll use the corresponding argument.
@@ -762,68 +763,62 @@ private[internal] trait TypeMaps {
   class SubstSymMap(from: List[Symbol], to: List[Symbol]) extends SubstMap(from, to) {
     def this(pairs: (Symbol, Symbol)*) = this(pairs.toList.map(_._1), pairs.toList.map(_._2))
 
-    protected def toType(fromtp: Type, sym: Symbol) = fromtp match {
-      case TypeRef(pre, _, args) => copyTypeRef(fromtp, pre, sym, args)
-      case SingleType(pre, _) => singleType(pre, sym)
+    protected def toType(fromTpe: Type, sym: Symbol) = fromTpe match {
+      case TypeRef(pre, _, args) => copyTypeRef(fromTpe, pre, sym, args)
+      case SingleType(pre, _)    => singleType(pre, sym)
+      case x                     => throw new MatchError(x)
     }
-    @tailrec private def subst(sym: Symbol, from: List[Symbol], to: List[Symbol]): Symbol = (
+
+    @tailrec private def subst(sym: Symbol, from: List[Symbol], to: List[Symbol]): Symbol =
       if (from.isEmpty) sym
       // else if (to.isEmpty) error("Unexpected substitution on '%s': from = %s but to == Nil".format(sym, from))
       else if (matches(from.head, sym)) to.head
       else subst(sym, from.tail, to.tail)
-      )
-    private def substFor(sym: Symbol) = subst(sym, from, to)
 
-    override def apply(tp: Type): Type = (
-      if (from.isEmpty) tp
-      else tp match {
+    private def substFor(sym: Symbol) =
+      subst(sym, from, to)
+
+    override def apply(tpe: Type): Type =
+      if (from.isEmpty) tpe else tpe match {
         case TypeRef(pre, sym, args) if pre ne NoPrefix =>
           val newSym = substFor(sym)
-          // mapOver takes care of subst'ing in args
-          ( if (sym eq newSym) tp else copyTypeRef(tp, pre, newSym, args) ).mapOver(this)
-        // assert(newSym.typeParams.length == sym.typeParams.length, "typars mismatch in SubstSymMap: "+(sym, sym.typeParams, newSym, newSym.typeParams))
+          // mapOver takes care of substituting in args
+          (if (sym eq newSym) tpe else copyTypeRef(tpe, pre, newSym, args)).mapOver(this)
+        // assert(newSym.typeParams.length == sym.typeParams.length, "typeParams mismatch in SubstSymMap: "+(sym, sym.typeParams, newSym, newSym.typeParams))
         case SingleType(pre, sym) if pre ne NoPrefix =>
           val newSym = substFor(sym)
-          ( if (sym eq newSym) tp else singleType(pre, newSym) ).mapOver(this)
+          (if (sym eq newSym) tpe else singleType(pre, newSym)).mapOver(this)
         case _ =>
-          super.apply(tp)
+          super.apply(tpe)
       }
-      )
 
     object mapTreeSymbols extends TypeMapTransformer {
       val strictCopy = newStrictTreeCopier
 
-      def termMapsTo(sym: Symbol) = from indexOf sym match {
-        case -1   => None
-        case idx  => Some(to(idx))
-      }
-
       // if tree.symbol is mapped to another symbol, passes the new symbol into the
       // constructor `trans` and sets the symbol and the type on the resulting tree.
-      def transformIfMapped(tree: Tree)(trans: Symbol => Tree) = termMapsTo(tree.symbol) match {
-        case Some(toSym) => trans(toSym) setSymbol toSym setType tree.tpe
-        case None => tree
-      }
+      def transformIfMapped(tree: Tree)(trans: Symbol => Tree): Tree =
+        from.indexOf(tree.symbol) match {
+          case -1 => tree
+          case idx =>
+            val toSym = to(idx)
+            trans(toSym).setSymbol(toSym).setType(tree.tpe)
+        }
 
       // changes trees which refer to one of the mapped symbols. trees are copied before attributes are modified.
-      override def transform(tree: Tree) = {
+      override def transform(tree: Tree): Tree =
         // super.transform maps symbol references in the types of `tree`. it also copies trees where necessary.
         super.transform(tree) match {
           case id @ Ident(_) =>
-            transformIfMapped(id)(toSym =>
-              strictCopy.Ident(id, toSym.name))
-
-          case sel @ Select(qual, name) =>
-            transformIfMapped(sel)(toSym =>
-              strictCopy.Select(sel, qual, toSym.name))
-
+            transformIfMapped(id)(toSym => strictCopy.Ident(id, toSym.name))
+          case sel @ Select(qual, _) =>
+            transformIfMapped(sel)(toSym => strictCopy.Select(sel, qual, toSym.name))
           case tree => tree
         }
-      }
     }
-    override def mapOver(tree: Tree, giveup: () => Nothing): Tree = {
+
+    override def mapOver(tree: Tree, giveup: () => Nothing): Tree =
       mapTreeSymbols.transform(tree)
-    }
   }
 
   /** A map to implement the `subst` method. */
@@ -1045,18 +1040,20 @@ private[internal] trait TypeMaps {
         }
       }
 
+    private class CollectingTraverser(p: Tree => Boolean) extends FindTreeTraverser(p) {
+      def collect(arg: Tree): Boolean = {
+        /*super[FindTreeTraverser].*/ result = None
+        traverse(arg)
+        /*super[FindTreeTraverser].*/ result.isDefined
+      }
+    }
+
     private lazy val findInTree = {
       def inTree(t: Tree): Boolean = {
         if (pred(t.symbol)) result = true else apply(t.tpe)
         result
       }
-      new FindTreeTraverser(inTree) {
-        def collect(arg: Tree): Boolean = {
-          /*super[FindTreeTraverser].*/ result = None
-          traverse(arg)
-          /*super[FindTreeTraverser].*/ result.isDefined
-        }
-      }
+      new CollectingTraverser(inTree)
     }
 
     override def foldOver(arg: Tree) = if (!result) findInTree.collect(arg)

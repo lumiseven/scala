@@ -58,14 +58,15 @@ trait PatternMatching extends Transform
 
   val phaseName: String = "patmat"
 
-  def newTransformer(unit: CompilationUnit): Transformer = new MatchTransformer(unit)
+  def newTransformer(unit: CompilationUnit): AstTransformer = new MatchTransformer(unit)
 
   class MatchTransformer(unit: CompilationUnit) extends TypingTransformer(unit) {
     override def transform(tree: Tree): Tree = tree match {
       case Match(sel, cases) =>
         val origTp = tree.tpe
+
         // setType origTp intended for CPS -- TODO: is it necessary?
-        val translated = translator(sel.pos).translateMatch(treeCopy.Match(tree, transform(sel), transformTrees(cases).asInstanceOf[List[CaseDef]]))
+        val translated = translator(sel.pos).translateMatch(treeCopy.Match(tree, transform(sel), transformCaseDefs(cases)))
         try {
           // Keep 2.12 behaviour of using wildcard expected type, recomputing the LUB, then throwing it away for the continuations plugins
           // but for the rest of us pass in top as the expected type to avoid waste.
@@ -85,7 +86,7 @@ trait PatternMatching extends Transform
         }
       case Try(block, catches, finalizer) =>
         val selectorPos = catches.headOption.getOrElse(EmptyTree).orElse(finalizer).pos.focusEnd
-        treeCopy.Try(tree, transform(block), translator(selectorPos).translateTry(transformTrees(catches).asInstanceOf[List[CaseDef]], tree.tpe, tree.pos), transform(finalizer))
+        treeCopy.Try(tree, transform(block), translator(selectorPos).translateTry(transformCaseDefs(catches), tree.tpe, tree.pos), transform(finalizer))
       case _ => super.transform(tree)
     }
 
@@ -95,6 +96,7 @@ trait PatternMatching extends Transform
     def translator(selectorPos: Position): MatchTranslator with CodegenCore = {
       new OptimizingMatchTranslator(localTyper, selectorPos)
     }
+
   }
 
 
@@ -189,11 +191,14 @@ trait Interface extends ast.TreeDSL {
 
     def reportUnreachable(pos: Position) = typer.context.warning(pos, "unreachable code", WarningCategory.OtherMatchAnalysis)
     def reportMissingCases(pos: Position, counterExamples: List[String]) = {
-      val ceString =
-        if (counterExamples.tail.isEmpty) "input: " + counterExamples.head
-        else "inputs: " + counterExamples.mkString(", ")
+      val ceString = counterExamples match {
+        case Nil        => "" // never occurs, but not carried in the type
+        case "_" :: Nil => ""
+        case ex :: Nil  => s"\nIt would fail on the following input: $ex"
+        case exs        => s"\nIt would fail on the following inputs: ${exs.mkString(", ")}"
+      }
 
-      typer.context.warning(pos, "match may not be exhaustive.\nIt would fail on the following "+ ceString, WarningCategory.OtherMatchAnalysis)
+      typer.context.warning(pos, s"match may not be exhaustive.$ceString", WarningCategory.OtherMatchAnalysis)
     }
   }
 
@@ -210,7 +215,7 @@ trait Interface extends ast.TreeDSL {
     }
 
     class Substitution(val from: List[Symbol], val to: List[Tree]) {
-      import global.{Transformer, Ident, NoType, TypeTree, SingleType}
+      import global.{AstTransformer, Ident, NoType, TypeTree, SingleType}
 
       private def typedStable(t: Tree) = typer.typed(t.shallowDuplicate, Mode.MonoQualifierModes | Mode.TYPEPATmode)
       lazy val toTypes: List[Type] = to map (tree => typedStable(tree).tpe)
@@ -243,7 +248,7 @@ trait Interface extends ast.TreeDSL {
           case _          => false
         }
 
-        object substIdentsForTrees extends Transformer {
+        object substIdentsForTrees extends AstTransformer {
           private def typedIfOrigTyped(to: Tree, origTp: Type): Tree =
             if (origTp == null || origTp == NoType) to
             // important: only type when actually substituting and when original tree was typed

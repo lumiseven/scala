@@ -16,7 +16,7 @@ package typechecker
 import symtab.Flags._
 import scala.collection.mutable
 import scala.reflect.ClassTag
-import PartialFunction.{ cond => when }
+import PartialFunction.{cond => when}
 
 /**
  *  @author Lukas Rytz
@@ -277,6 +277,8 @@ trait NamesDefaults { self: Analyzer =>
             blockWithoutQualifier(Some(qual.duplicate))
           else
             blockWithQualifier(qual, name)
+
+        case x => throw new MatchError(x)
       }
     }
 
@@ -345,8 +347,8 @@ trait NamesDefaults { self: Analyzer =>
         val transformedFun = transformNamedApplication(typer, mode, pt)(fun, x => x)
         if (transformedFun.isErroneous) setError(tree)
         else {
-          val NamedApplyBlock(NamedApplyInfo(qual, targs, vargss, blockTyper)) = transformedFun
-          val Block(stats, funOnly) = transformedFun
+          val NamedApplyBlock(NamedApplyInfo(qual, targs, vargss, blockTyper)) = transformedFun: @unchecked
+          val Block(stats, funOnly) = transformedFun: @unchecked
 
           // type the application without names; put the arguments in definition-site order
           val typedApp = doTypedApply(tree, funOnly, reorderArgs(namelessArgs, argPos), mode, pt)
@@ -526,7 +528,7 @@ trait NamesDefaults { self: Analyzer =>
     val namelessArgs = {
       var positionalAllowed = true
       def stripNamedArg(arg: NamedArg, argIndex: Int): Tree = {
-        val NamedArg(Ident(name), rhs) = arg
+        val NamedArg(Ident(name), rhs) = arg: @unchecked
         params indexWhere (p => matchesName(p, name, argIndex)) match {
           case -1 =>
             val warnVariableInScope = !currentRun.isScala3 && context0.lookupSymbol(name, _.isVariable).isSuccess

@@ -1,6 +1,6 @@
 package scala.collection.immutable
 
-import org.junit.Assert._
+import org.junit.Assert.{ assertThrows => _, _ }
 import org.junit.{Ignore, Test}
 import org.junit.runner.RunWith
 import org.junit.runners.JUnit4
@@ -238,7 +238,7 @@ class HashSetTest extends AllocationTest {
     override def toString: String = s"$hashCode-$other"
   }
   @Ignore // TODO Port {HashMap, HashSet}.concat allocation reduction
-  @Test def collidingAdd: Unit = {
+  @Test def collidingAdd(): Unit = {
     val initial = generateWithCollisions(1, 1000)
     assertEquals(1000, initial.size)
     assertEquals(1000, initial.toList.size)

@@ -9,7 +9,7 @@ import scala.tools.testkit.AllocationTest
 @RunWith(classOf[JUnit4])
 class SortedMapTest extends AllocationTest {
   @Test
-  def testWithDefaultValueReturnsSortedMapWithDeaultValue(): Unit = {
+  def testWithDefaultValueReturnsSortedMapWithDefaultValue(): Unit = {
     val tree: SortedMap[Int, String] = SortedMap.from(Map(1 -> "One", 2 -> "Two"))
       .withDefault(defaultValueFunction)
 
@@ -91,9 +91,9 @@ class SortedMapTest extends AllocationTest {
 
   @Test
   def testDefaulValueIsPersistedWhenNewMapIterableIsConcatenatedToOriginalMap(): Unit = {
-    val originaMap: SortedMap[Int, String] = TreeMap(1 -> "One", 2 -> "Two")
+    val originalMap: SortedMap[Int, String] = TreeMap(1 -> "One", 2 -> "Two")
       .withDefaultValue("element missing")
-    val newMap: SortedMap[Int, String] = originaMap ++ Map(3 -> "Three")
+    val newMap: SortedMap[Int, String] = originalMap ++ Map(3 -> "Three")
 
     assertEquals("element missing", newMap(4))
   }
@@ -108,14 +108,14 @@ class SortedMapTest extends AllocationTest {
     i => s"$i is not present in this map"
   }
   @Test
-  def testWithDefaultValue: Unit = {
+  def testWithDefaultValue(): Unit = {
     val m1 = SortedMap(1 -> "a", 2 -> "b")
     val m2 = m1.withDefaultValue("missing")
     assertEquals("a", m2(1))
     assertEquals("missing", m2(3))
   }
   @Test
-  def testWithDefault: Unit = {
+  def testWithDefault(): Unit = {
     val m1 = SortedMap(1 -> "a", 2 -> "b")
 
     val m2: Map[Int, String] =
@@ -140,26 +140,26 @@ class SortedMapTest extends AllocationTest {
     assertEquals(m4(100), "101")
   }
 
-  @Test def updatedWithReturnsSortedMap: Unit = {
+  @Test def updatedWithReturnsSortedMap(): Unit = {
     val m1 = SortedMap(1 -> "a")
     val m2 = m1.updatedWith(2) { case Some(v) => Some(v.toUpperCase) case None => Some("DEFAULT") }
     val m3: SortedMap[Int, String] = m2 // check the type returned by `updatedWith`
     assertEquals(SortedMap(1 -> "a", 2 -> "DEFAULT"), m3)
   }
 
-  @Test def empty: Unit = {
+  @Test def empty(): Unit = {
     val ord = Ordering[String]
     exactAllocates(24)(SortedMap.empty[String, String](ord))
   }
-  @Test def apply0: Unit = {
+  @Test def apply0(): Unit = {
     val ord = Ordering[String]
     exactAllocates(24)(SortedMap()(ord))
   }
-  @Test def apply1: Unit = {
+  @Test def apply1(): Unit = {
     val ord = Ordering[String]
     onlyAllocates(200)(SortedMap(("a", "a"))(ord))
   }
-  @Test def apply2: Unit = {
+  @Test def apply2(): Unit = {
     val ord = Ordering[String]
     onlyAllocates(312)(SortedMap(("a", "a"), ("b", "b"))(ord))
   }

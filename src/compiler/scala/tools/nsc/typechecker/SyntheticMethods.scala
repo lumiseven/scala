@@ -122,7 +122,7 @@ trait SyntheticMethods extends ast.TreeDSL {
       )
     }
 
-    def perElementMethod(name: Name, returnType: Type)(caseFn: Symbol => Tree): Tree =
+    def perElementMethod(name: Name, returnType: Type)(caseFn: Symbol => Tree): Tree = 
       createSwitchMethod(name, accessors.indices, returnType)(idx => caseFn(accessors(idx)))
 
     def productElementNameMethod = {
@@ -191,11 +191,10 @@ trait SyntheticMethods extends ast.TreeDSL {
           if (usefulEquals) {
             val thisAcc  = Select(mkThis, acc)
             val otherAcc = Select(Ident(otherSym), acc)
-            val op       = acc.tpe.member(nme.EQ)
             if (isPrimitiveValueType(resultType))
-              prims += fn(thisAcc, op, otherAcc)
+              prims += fn(thisAcc, acc.tpe.member(nme.EQ), otherAcc)
             else
-              refs  += fn(thisAcc, op, otherAcc)   //gen.mkCast(otherAcc, AnyTpe)
+              refs  += fn(thisAcc, Any_==, otherAcc)
           }
         }
         prims.prependToList(refs.toList)      // (prims ++ refs).toList
@@ -252,7 +251,7 @@ trait SyntheticMethods extends ast.TreeDSL {
     /* The _1, _2, etc. methods to implement ProductN, disabled
      * until we figure out how to introduce ProductN without cycles.
      */
-    /****
+    /*
     def productNMethods = {
       val accs = accessors.toIndexedSeq
       1 to arity map (num => productProj(arity, num) -> (() => projectionMethod(accs(num - 1), num)))
@@ -260,7 +259,7 @@ trait SyntheticMethods extends ast.TreeDSL {
     def projectionMethod(accessor: Symbol, num: Int) = {
       createMethod(nme.productAccessorName(num), accessor.tpe.resultType)(_ => REF(accessor))
     }
-    ****/
+    */
 
     // methods for both classes and objects
     def productMethods: List[(Symbol, () => Tree)] = {

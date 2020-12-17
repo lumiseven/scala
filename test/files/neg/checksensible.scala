@@ -34,13 +34,13 @@ class EqEqValTest {
   "abc" == 1        // warns because the lub of String and Int is Any
   Some(1) == 1      // as above
 
-  true == new java.lang.Boolean(true) // none of these should warn except for deprecated API
-  new java.lang.Boolean(true) == true
+  true == java.lang.Boolean.valueOf(true) // none of these should warn
+  java.lang.Boolean.valueOf(true) == true
 
   new AnyRef == 1
-  1 == new AnyRef                 // doesn't warn because it could be...
-  1 == (new java.lang.Integer(1)) // ...something like this
-  1 == (new java.lang.Boolean(true))
+  1 == new AnyRef                   // doesn't warn because it could be...
+  1 == java.lang.Integer.valueOf(1) // ...something like this
+  1 == java.lang.Boolean.valueOf(true)
 
   1 != true
   () == true
@@ -99,4 +99,22 @@ class EqEqRefTest {
 
     in.close
   }
+}
+
+class AnyEqualsTest {
+  1L equals 1
+  // ok, because it's between the same numeric types
+  1 equals 1
+  // ok
+  1L equals "string"
+  // ok
+  1L.equals(())
+  (1L: Any) equals 1
+  (1L: AnyVal) equals 1
+  (1L: AnyVal) equals (1: AnyVal)
+  // ok
+  "string" equals 1
+  def foo[A](a: A) = a.equals(1)
+  // ok
+  def bar[A <: AnyRef](a: A) = a.equals(1)
 }

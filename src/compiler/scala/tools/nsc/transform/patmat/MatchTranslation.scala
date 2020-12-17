@@ -67,7 +67,7 @@ trait MatchTranslation {
       private lazy val extractor = ExtractorCall(tree)
 
       def pos     = tree.pos
-      def tpe     = binder.info.dealiasWiden  // the type of the variable bound to the pattern
+      def tpe     = binder.info.dealias // the type of the variable bound to the pattern
       def pt      = unbound match {
         case Star(tpt)      => this glbWith seqType(tpt.tpe)
         case TypeBound(tpe) => tpe
@@ -217,7 +217,7 @@ trait MatchTranslation {
 
       val start = if (StatisticsStatics.areSomeColdStatsEnabled) statistics.startTimer(statistics.patmatNanos) else null
 
-      val selectorTp = repeatedToSeq(elimAnonymousClass(selector.tpe.widen.withoutAnnotations))
+      val selectorTp = repeatedToSeq(elimAnonymousClass(selector.tpe.withoutAnnotations))
 
       // when one of the internal cps-type-state annotations is present, strip all CPS annotations
       val origPt  = removeCPSFromPt(match_.tpe)
@@ -261,7 +261,7 @@ trait MatchTranslation {
 
           for(cases <- emitTypeSwitch(bindersAndCases, pt).toList
               if cases forall treeInfo.isCatchCase; // must check again, since it's not guaranteed -- TODO: can we eliminate this? e.g., a type test could test for a trait or a non-trivial prefix, which are not handled by the back-end
-              cse <- cases) yield fixerUpper(matchOwner, pos)(cse).asInstanceOf[CaseDef]
+              cse <- cases) yield fixerUpper(matchOwner, pos)(cse)
         }
 
         val catches = if (swatches.nonEmpty) swatches else {
@@ -269,13 +269,16 @@ trait MatchTranslation {
           val casesNoSubstOnly = caseDefs map { caseDef => (propagateSubstitution(translateCase(scrutSym, pt)(caseDef), EmptySubstitution))}
 
           val exSym = freshSym(pos, pureType(ThrowableTpe), "ex")
+          val suppression =
+            if (settings.XnoPatmatAnalysis) Suppression.FullSuppression
+            else Suppression.NoSuppression.copy(suppressExhaustive = true) // try/catches needn't be exhaustive
 
           List(
               atPos(pos) {
                 CaseDef(
                   Bind(exSym, Ident(nme.WILDCARD)), // TODO: does this need fixing upping?
                   EmptyTree,
-                  combineCasesNoSubstOnly(REF(exSym), scrutSym, casesNoSubstOnly, pt, selectorPos, matchOwner, Some(scrut => Throw(REF(exSym))))
+                  combineCasesNoSubstOnly(REF(exSym), scrutSym, casesNoSubstOnly, pt, selectorPos, matchOwner, Some(scrut => Throw(REF(exSym))), suppression)
                 )
               })
         }
@@ -383,6 +386,7 @@ trait MatchTranslation {
       def apply(tree: Tree): ExtractorCall = tree match {
         case UnApply(unfun@Unapplied(fun), args) => new ExtractorCallRegular(fun, args)(unfun) // extractor
         case Apply(fun, args)                    => new ExtractorCallProd(fun, args)      // case class
+        case x                                   => throw new MatchError(x)
       }
     }
 
@@ -590,7 +594,7 @@ trait MatchTranslation {
 
       protected def spliceApply(pos: Position, binder: Symbol): (Tree, Boolean) = {
         var needsSubst = false
-        object splice extends Transformer {
+        object splice extends AstTransformer {
           def binderRef(pos: Position): Tree =
             REF(binder) setPos pos
           override def transform(t: Tree) = t match {

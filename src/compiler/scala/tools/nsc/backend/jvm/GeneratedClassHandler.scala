@@ -30,7 +30,7 @@ import scala.util.control.NonFatal
  * Interface to handle post-processing and classfile writing (see [[PostProcessor]]) of generated
  * classes, potentially in parallel.
  */
-private[jvm] sealed trait GeneratedClassHandler {
+private[jvm] sealed trait GeneratedClassHandler extends AutoCloseable {
   val postProcessor: PostProcessor
 
   /**
@@ -146,7 +146,7 @@ private[jvm] object GeneratedClassHandler {
           }
       }
 
-      /**
+      /*
        * Go through each task in submission order, wait for it to finish and report its messages.
        * When finding task that has not completed, steal work from the executor's queue and run
        * it on the main thread (which we are on here), until the task is done.

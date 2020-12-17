@@ -13,7 +13,7 @@
 package scala.tools.nsc
 package typechecker
 
-import scala.annotation.tailrec
+import scala.annotation.{nowarn, tailrec}
 import scala.collection.mutable
 import symtab.Flags._
 import scala.reflect.internal.util.ListOfNil
@@ -32,7 +32,7 @@ trait Namers extends MethodSynthesis {
   /** Replaces any Idents for which cond is true with fresh TypeTrees().
    *  Does the same for any trees containing EmptyTrees.
    */
-  private class TypeTreeSubstituter(cond: Name => Boolean) extends Transformer {
+  private class TypeTreeSubstituter(cond: Name => Boolean) extends AstTransformer {
     override def transform(tree: Tree): Tree = tree match {
       case Ident(name) if cond(name) => TypeTree()
       case _                         => super.transform(tree)
@@ -266,7 +266,14 @@ trait Namers extends MethodSynthesis {
           // line it comments unlinks one of them.  What does it intend?
         }
       }
-      scope enter sym
+      if (sym.isModule && sym.isSynthetic && sym.owner.isClass && !sym.isTopLevel) {
+        val entry = scope.lookupEntry(sym.name.toTypeName)
+        if (entry eq null)
+          scope enter sym
+        else
+          scope.enterBefore(sym, entry)
+      } else
+        scope enter sym
     }
 
     /** Logic to handle name conflicts of synthetically generated symbols
@@ -360,6 +367,7 @@ trait Namers extends MethodSynthesis {
       val pkgOwner = pid match {
         case Ident(_)                 => if (owner.isEmptyPackageClass) rootMirror.RootClass else owner
         case Select(qual: RefTree, _) => createPackageSymbol(pos, qual).moduleClass
+        case x                        => throw new MatchError(x)
       }
       val existing = pkgOwner.info.decls.lookup(pid.name)
 
@@ -418,6 +426,7 @@ trait Namers extends MethodSynthesis {
     /** Given a ClassDef or ModuleDef, verifies there isn't a companion which
      *  has been defined in a separate file.
      */
+    @nowarn("cat=lint-nonlocal-return")
     def validateCompanionDefs(tree: ImplDef): Unit = {
       val sym    = tree.symbol orElse { return }
       val ctx    = if (context.owner.isPackageObjectClass) context.outer else context
@@ -679,7 +688,7 @@ trait Namers extends MethodSynthesis {
             val userDefined = ownerInfo.memberBasedOnName(sym.name, BridgeFlags | SYNTHETIC)
 
             (userDefined != NoSymbol) && {
-              assert(userDefined != sym)
+              assert(userDefined != sym, "userDefined symbol cannot be the same as symbol of which it is a member")
               val alts = userDefined.alternatives // could be just the one, if this member isn't overloaded
               // don't compute any further `memberInfo`s if there's an error somewhere
               alts.exists(_.isErroneous) || {
@@ -840,6 +849,7 @@ trait Namers extends MethodSynthesis {
 
 // --- Lazy Type Assignment --------------------------------------------------
 
+    @nowarn("cat=lint-nonlocal-return")
     def findCyclicalLowerBound(tp: Type): Symbol = {
       tp match {
         case TypeBounds(lo, _) =>
@@ -1525,7 +1535,7 @@ trait Namers extends MethodSynthesis {
      * flag.
      */
     private def addDefaultGetters(meth: Symbol, ddef: DefDef, vparamss: List[List[ValDef]], tparams: List[TypeDef], overridden: Symbol): Unit = {
-      val DefDef(_, _, rtparams0, rvparamss0, _, _) = resetAttrs(deriveDefDef(ddef)(_ => EmptyTree).duplicate)
+      val DefDef(_, _, rtparams0, rvparamss0, _, _) = resetAttrs(deriveDefDef(ddef)(_ => EmptyTree).duplicate): @unchecked
       // having defs here is important to make sure that there's no sneaky tree sharing
       // in methods with multiple default parameters
       def rtparams  = rtparams0.map(_.duplicate)
@@ -1672,7 +1682,7 @@ trait Namers extends MethodSynthesis {
             moduleNamer match {
               case Some(namer) =>
                 val cdef = attachment.classWithDefault
-                val ClassDef(_, _, rtparams, _) = resetAttrs(deriveClassDef(cdef)(_ => Template(Nil, noSelfType, Nil)).duplicate)
+                val ClassDef(_, _, rtparams, _) = resetAttrs(deriveClassDef(cdef)(_ => Template(Nil, noSelfType, Nil)).duplicate): @unchecked
                 val defTparams = rtparams.map(rt => copyTypeDef(rt)(mods = rt.mods &~ (COVARIANT | CONTRAVARIANT)))
                 val tree = create(namer, defTparams)
                 namer.enterSyntheticSym(tree)
@@ -1877,6 +1887,7 @@ trait Namers extends MethodSynthesis {
       try tree match {
         case member: MemberDef => createNamer(tree).memberSig(member)
         case imp: Import       => importSig(imp)
+        case x                 => throw new MatchError(x)
       } catch typeErrorHandler(tree, ErrorType)
     }
 
@@ -1891,11 +1902,24 @@ trait Namers extends MethodSynthesis {
       annotations filterNot (_ eq null) map { ann =>
         val ctx = typer.context
         // need to be lazy, #1782. enteringTyper to allow inferView in annotation args, scala/bug#5892.
-        AnnotationInfo lazily {
-          enteringTyper {
-            val annotSig = newTyper(ctx.makeNonSilent(ann)).typedAnnotation(ann, Some(annotee))
-            if (pred(annotSig)) annotSig else UnmappableAnnotation // UnmappableAnnotation will be dropped in typedValDef and typedDefDef
-          }
+        def computeInfo: AnnotationInfo = enteringTyper {
+          val annotSig = newTyper(ctx.makeNonSilent(ann)).typedAnnotation(ann, Some(annotee))
+          if (pred(annotSig)) annotSig else UnmappableAnnotation // UnmappableAnnotation will be dropped in typedValDef and typedDefDef
+        }
+        ann match {
+          case treeInfo.Applied(Select(New(tpt), _), _, _) =>
+            // We can defer typechecking the arguments of annotations. This is important to avoid cycles in
+            // checking `hasAnnotation(UncheckedStable)` during typechecking.
+            def computeSymbol = enteringTyper {
+              val tptCopy = tpt.duplicate
+              val silentTyper  = newTyper(ctx.makeSilent(newtree = tptCopy))
+              // Discard errors here, we'll report them in `computeInfo`.
+              val tpt1 = silentTyper.typedTypeConstructor(tptCopy)
+              tpt1.tpe.finalResultType.typeSymbol
+            }
+            AnnotationInfo.lazily(computeSymbol, computeInfo)
+          case _ =>
+            AnnotationInfo.lazily(computeInfo)
         }
       }
 
@@ -1915,7 +1939,7 @@ trait Namers extends MethodSynthesis {
         case tdef: TypeDef   => typeDefSig(tdef)
         case cdef: ClassDef  => classSig(cdef)
         case mdef: ModuleDef => moduleSig(mdef)
-        // skip PackageDef
+        case x: PackageDef   => throw new MatchError(x) // skip PackageDef
       }
 
     def includeParent(tpe: Type, parent: Symbol): Type = tpe match {

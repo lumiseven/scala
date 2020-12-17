@@ -21,6 +21,7 @@ import scala.annotation.tailrec
 import scala.annotation.unchecked.uncheckedVariance
 import scala.collection.generic.SerializeEnd
 import scala.collection.mutable.{ArrayBuffer, StringBuilder}
+import scala.language.implicitConversions
 import Stream.cons
 
 @deprecated("Use LazyList (which is fully lazy) instead of Stream (which has a lazy tail only)", "2.13.0")
@@ -120,9 +121,6 @@ sealed abstract class Stream[+A] extends AbstractSeq[A]
     */
   def lazyAppendedAll[B >: A](suffix: => collection.IterableOnce[B]): Stream[B] =
     if (isEmpty) iterableFactory.from(suffix) else cons[B](head, tail.lazyAppendedAll(suffix))
-
-  override def equals(that: Any): Boolean =
-    if (this eq that.asInstanceOf[AnyRef]) true else super.equals(that)
 
   override def scanLeft[B](z: B)(op: (B, A) => B): Stream[B] =
     if (isEmpty) z +: iterableFactory.empty

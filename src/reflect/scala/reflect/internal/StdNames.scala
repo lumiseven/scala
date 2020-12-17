@@ -15,8 +15,9 @@ package reflect
 package internal
 
 import java.security.MessageDigest
+
 import Chars.isOperatorPart
-import scala.annotation.switch
+import scala.annotation.{nowarn, switch}
 import scala.collection.immutable
 import scala.io.Codec
 
@@ -170,8 +171,12 @@ trait StdNames {
     final val WILDCARD: NameType = nameType("_")
   }
 
+  // FIXME: This class requires early initializers to work, which are deprecated
+  //        and will not be supported in 3.0. Please change the design and remove
+  //        the early initializer.
   /** This should be the first trait in the linearization. */
   // abstract class Keywords extends CommonNames {
+  @nowarn("cat=deprecation&msg=early initializers")
   abstract class Keywords extends {
     private[this] val kw = new KeywordSetBuilder
 
@@ -283,6 +288,8 @@ trait StdNames {
     final val TypeName: NameType            = nameType("TypeName")
     final val TypeDef: NameType             = nameType("TypeDef")
     final val Quasiquote: NameType          = nameType("Quasiquote")
+    final val macroImplLocation: NameType   = nameType("macroImplLocation")
+    final val UnapplySeqWrapper: NameType   = nameType("UnapplySeqWrapper")
 
     // async
     final val stateMachine: NameType        = nameType("stateMachine$async")
@@ -307,6 +314,7 @@ trait StdNames {
     final val MethodParametersATTR: NameType       = nameType("MethodParameters")
     final val RuntimeAnnotationATTR: NameType      = nameType("RuntimeVisibleAnnotations") // RetentionPolicy.RUNTIME
     final val ScalaATTR: NameType                  = nameType("Scala")
+    final val TASTYATTR: NameType                  = nameType("TASTY")
     final val ScalaSignatureATTR: NameType         = nameType("ScalaSig")
     final val SignatureATTR: NameType              = nameType("Signature")
     final val SourceFileATTR: NameType             = nameType("SourceFile")
@@ -363,8 +371,8 @@ trait StdNames {
     val MIRROR_SHORT: NameType             = nameType("$m")
     val MIRROR_UNTYPED: NameType           = nameType("$m$untyped")
     val REIFY_FREE_PREFIX: NameType        = nameType("free$")
-    val REIFY_FREE_THIS_SUFFIX: NameType   = nameType("$this")
-    val REIFY_FREE_VALUE_SUFFIX: NameType  = nameType("$" + "value") // looks like missing interpolator due to `value` in scopre
+    val REIFY_FREE_THIS_SUFFIX: NameType   = nameType(s"$$this")
+    val REIFY_FREE_VALUE_SUFFIX: NameType  = nameType(s"$$value") // looks like missing interpolator due to `value` in scope
     val REIFY_SYMDEF_PREFIX: NameType      = nameType("symdef$")
     val QUASIQUOTE_CASE: NameType          = nameType("$quasiquote$case$")
     val QUASIQUOTE_EARLY_DEF: NameType     = nameType("$quasiquote$early$def$")
@@ -386,15 +394,16 @@ trait StdNames {
     val OUTER_SYNTH: NameType              = nameType("<outer>") // emitted by virtual pattern matcher, replaced by outer accessor in explicitouter
     val ROOTPKG: NameType                  = nameType("_root_")
     val SELECTOR_DUMMY: NameType           = nameType("<unapply-selector>")
-    val SELF: NameType                     = nameType("$this")
+    val SELF: NameType                     = nameType(s"$$this")
     val SETTER_SUFFIX: NameType            = nameType(NameTransformer.SETTER_SUFFIX_STRING)
     val SPECIALIZED_INSTANCE: NameType     = nameType("specInstance$")
     val STAR: NameType                     = nameType("*")
-    val THIS: NameType                     = nameType("_$this")
+    val THIS: NameType                     = nameType(s"_$$this")
 
 
     val annottees: NameType               = nameType("annottees")       // for macro annotations
     val macroTransform: NameType          = nameType("macroTransform")  // for macro annotations
+    val unpickledMacroImpl: NameType      = nameType("unpickledMacroImpl") // for tasty macro unpickling
 
     def isConstructorName(name: Name)       = name == CONSTRUCTOR || name == MIXIN_CONSTRUCTOR
     def isExceptionResultName(name: Name)   = name startsWith EXCEPTION_RESULT_PREFIX
@@ -443,6 +452,9 @@ trait StdNames {
      *  Look backward from the end of the string for "$$", and take the
      *  part of the string after that; but if the string is "$$$" or longer,
      *  be sure to retain the extra dollars.
+     *  If the name happens to be a back quoted name containing literal $$
+     *  or $ followed by an operator that gets encoded, go directly to compiler
+     *  crash. Do not pass go and don't even think about collecting any $$
      */
     def unexpandedName(name: Name): Name = {
       if (!name.containsChar('$')) name // lastIndexOf calls Name.toString, add a fast path to avoid that.
@@ -530,7 +542,7 @@ trait StdNames {
     }
 
     def localDummyName(clazz: Symbol): TermName = newTermName(LOCALDUMMY_PREFIX + clazz.name + ">")
-    def superName(name: Name, mix: Name = EMPTY): TermName = newTermName(SUPER_PREFIX_STRING + name + (if (mix.isEmpty) "" else "$" + mix))
+    def superName(name: Name, mix: Name = EMPTY): TermName = newTermName(s"${SUPER_PREFIX_STRING}${name}${if (mix.isEmpty) "" else s"$$$mix"}")
 
     /** The name of an accessor for protected symbols. */
     def protName(name: Name): TermName = newTermName(PROTECTED_PREFIX + name)
@@ -590,7 +602,7 @@ trait StdNames {
       case 7  => nme.x_7
       case 8  => nme.x_8
       case 9  => nme.x_9
-      case _  => newTermName("x$" + i)
+      case _  => newTermName(s"x$$$i")
     }
 
     def productAccessorName(j: Int): TermName = (j: @switch) match {
@@ -706,7 +718,7 @@ trait StdNames {
     val asModule: NameType             = nameType("asModule")
     val asType: NameType               = nameType("asType")
     val asInstanceOf_ : NameType       = nameType("asInstanceOf")
-    val asInstanceOf_Ob : NameType     = nameType("$" + "asInstanceOf") // looks like missing interpolator due to Any member in scope
+    val asInstanceOf_Ob : NameType     = nameType(s"$$asInstanceOf") // looks like missing interpolator due to Any member in scope
     val async : NameType               = nameType("async")
     val await : NameType               = nameType("await")
     val box: NameType                  = nameType("box")
@@ -716,7 +728,7 @@ trait StdNames {
     val classOf: NameType              = nameType("classOf")
     val clone_ : NameType              = nameType("clone")
     val collection: NameType           = nameType("collection")
-    val conforms: NameType             = nameType("$" + "conforms") // $ prefix to avoid shadowing Predef.conforms
+    val conforms: NameType             = nameType(s"$$conforms") // $ prefix to avoid shadowing Predef.conforms
     val copy: NameType                 = nameType("copy")
     val create: NameType               = nameType("create")
     val currentMirror: NameType        = nameType("currentMirror")
@@ -763,7 +775,7 @@ trait StdNames {
     val isDefinedAt: NameType          = nameType("isDefinedAt")
     val isEmpty: NameType              = nameType("isEmpty")
     val isInstanceOf_ : NameType       = nameType("isInstanceOf")
-    val isInstanceOf_Ob : NameType     = nameType("$" + "isInstanceOf") // looks like missing interpolator due to Any member in scope
+    val isInstanceOf_Ob : NameType     = nameType(s"$$isInstanceOf") // looks like missing interpolator due to Any member in scope
     val java: NameType                 = nameType("java")
     val key: NameType                  = nameType("key")
     val lang: NameType                 = nameType("lang")
@@ -867,13 +879,13 @@ trait StdNames {
     val zero: NameType                 = nameType("zero")
 
     // async
-    val result           : NameType       = nameType("result$" + "async") // avoid missing interpolator warnings
-    val awaitable        : NameType       = nameType("awaitable$" + "async")
-    val completed        : NameType       = nameType("completed$" + "async")
-    val stateMachine     : NameType       = nameType("stateMachine$" + "async")
+    val result           : NameType       = nameType(s"result$$async") // avoid missing interpolator warnings
+    val awaitable        : NameType       = nameType(s"awaitable$$async")
+    val completed        : NameType       = nameType(s"completed$$async")
+    val stateMachine     : NameType       = nameType(s"stateMachine$$async")
     val state            : NameType       = nameType("state")
-    val tr               : NameType       = nameType("tr$" + "async")
-    val t                : NameType       = nameType("throwable$" + "async")
+    val tr               : NameType       = nameType(s"tr$$async")
+    val t                : NameType       = nameType(s"throwable$$async")
 
     // quasiquote interpolators:
     val q: NameType  = nameType("q")
@@ -987,6 +999,8 @@ trait StdNames {
     val UNARY_+ = encode("unary_+")
     val UNARY_- = encode("unary_-")
     val UNARY_! = encode("unary_!")
+
+    val isEncodedUnary = Set[Name](UNARY_~, UNARY_+, UNARY_-, UNARY_!)
 
     // Grouped here so Cleanup knows what tests to perform.
     val CommonOpNames   = Set[Name](OR, XOR, AND, EQ, NE)

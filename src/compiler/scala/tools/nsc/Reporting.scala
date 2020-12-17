@@ -30,7 +30,7 @@ import scala.util.matching.Regex
 trait Reporting extends internal.Reporting { self: ast.Positions with CompilationUnits with internal.Symbols =>
   def settings: Settings
 
-  @deprecated("use `globalError` instead")
+  @deprecated("use `globalError` instead", since = "2.13.4")
   def error(msg: String): Unit = globalError(msg)
 
   // a new instance of this class is created for every Run (access the current instance via `runReporting`)
@@ -76,23 +76,20 @@ trait Reporting extends internal.Reporting { self: ast.Positions with Compilatio
     def warnUnusedSuppressions(): Unit = {
       // if we stop before typer completes (errors in parser, Ystop), report all suspended messages
       suspendedMessages.foreach(issueWarning)
-      if (settings.warnUnusedNowarn && !settings.isScaladoc) { // scaladoc doesn't run all phases, so not all warnings are emitted
-        val sources = suppressions.keysIterator.toList
-        for (source <- sources; sups <- suppressions.remove(source); sup <- sups.reverse) {
-          if (!sup.used)
-            issueWarning(Message.Plain(sup.annotPos, "@nowarn annotation does not suppress any warnings", WarningCategory.UnusedNowarn, ""))
-        }
-      }
+      // scaladoc doesn't run all phases, so not all warnings are emitted
+      if (settings.warnUnusedNowarn && !settings.isScaladoc)
+        for {
+          source <- suppressions.keysIterator.toList
+          sups   <- suppressions.remove(source)
+          sup    <- sups.reverse
+        } if (!sup.used) issueWarning(Message.Plain(sup.annotPos, "@nowarn annotation does not suppress any warnings", WarningCategory.UnusedNowarn, ""))
     }
 
     def reportSuspendedMessages(): Unit = {
       suppressionsComplete = true
       // sort suppressions. they are not added in any particular order because of lazy type completion
       suppressions.mapValuesInPlace((_, sups) => sups.sortBy(sup => 0 - sup.start))
-      suspendedMessages.foreach { m =>
-        if (!isSuppressed(m))
-          issueWarning(m)
-      }
+      suspendedMessages.foreach(m => if (!isSuppressed(m)) issueWarning(m))
       suspendedMessages.clear()
     }
 
@@ -202,6 +199,8 @@ trait Reporting extends internal.Reporting { self: ast.Positions with Compilatio
     }
 
     private[this] var reportedFeature = Set[Symbol]()
+    protected def featureReported(featureTrait: Symbol): Unit = reportedFeature += featureTrait
+
     // we don't have access to runDefinitions here, so mapping from strings instead of feature symbols
     private val featureCategory: Map[String, WarningCategory.Feature] = {
       import WarningCategory._
@@ -339,6 +338,7 @@ object Reporting {
     object OtherMatchAnalysis extends Other; add(OtherMatchAnalysis)
     object OtherDebug extends Other; add(OtherDebug)
     object OtherNullaryOverride extends Other; add(OtherNullaryOverride)
+    object OtherNonCooperativeEquals extends Other; add(OtherNonCooperativeEquals)
 
     sealed trait WFlag extends WarningCategory { override def summaryCategory: WarningCategory = WFlag }
     object WFlag extends WFlag { override def includes(o: WarningCategory): Boolean = o.isInstanceOf[WFlag] }; add(WFlag)
@@ -588,7 +588,7 @@ object Reporting {
         case "info-summary" | "is" => Right(InfoSummary)
         case "info-verbose" | "iv" => Right(InfoVerbose)
         case "silent" | "s" => Right(Silent)
-        case _ => Left(List(s"unknonw action: `$s`"))
+        case _ => Left(List(s"unknown action: `$s`"))
       }
 
       if (setting.isEmpty) Right(WConf(Nil))

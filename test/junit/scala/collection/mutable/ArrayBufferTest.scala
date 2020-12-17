@@ -1,15 +1,15 @@
 package scala.collection.mutable
 
-import org.junit.runner.RunWith
-import org.junit.runners.JUnit4
 import org.junit.Test
-import org.junit.Assert.assertEquals
+import org.junit.Assert.{assertEquals, assertTrue}
 
-import scala.tools.testkit.AssertUtil.assertThrows
+import scala.annotation.nowarn
+import scala.tools.testkit.AssertUtil.{assertThrows, fail}
+import scala.tools.testkit.ReflectUtil.{getMethodAccessible, _}
 
-/* Test for scala/bug#9043 */
-@RunWith(classOf[JUnit4])
 class ArrayBufferTest {
+
+  /* Test for scala/bug#9043 */
   @Test
   def testInsertAll(): Unit = {
     val traver = ArrayBuffer(2, 4, 5, 7)
@@ -185,6 +185,7 @@ class ArrayBufferTest {
   def testRemoveManyWithTooLargeCount(): Unit =
     assertThrows[IndexOutOfBoundsException](ArrayBuffer(0).remove(index = 0, count = 100))
 
+  @nowarn("cat=deprecation")
   @Test
   def testTrimStart(): Unit = {
     val b1 = ArrayBuffer()
@@ -204,6 +205,7 @@ class ArrayBufferTest {
     assertEquals(ArrayBuffer.range(10, 100), b4)
   }
 
+  @nowarn("cat=deprecation")
   @Test
   def testTrimEnd(): Unit = {
     val b1 = ArrayBuffer()
@@ -344,7 +346,7 @@ class ArrayBufferTest {
 
   @Test def t11417_sortInPlace(): Unit = {
     val a = ArrayBuffer(5,4,3,2,1)
-    a.trimEnd(2)
+    a.dropRightInPlace(2)
     a.sortInPlace()
     assertEquals(List(3,4,5), a)
   }
@@ -361,4 +363,88 @@ class ArrayBufferTest {
 
   @Test def t11482_allowNegativeInitialSize(): Unit =
     new ArrayBuffer(-1)
+
+  @Test def t12176_indexOutOfBoundsExceptionMessage(): Unit = {
+    def newAB = ArrayBuffer('a', 'b', 'c')
+    def iiobe[A](f: => A, msg: String) =
+      try {
+        f; fail("Did not throw IndexOutOfBoundsException")
+      } catch {
+        case ex: IndexOutOfBoundsException => assertEquals(ex.getMessage, msg)
+      }
+
+    iiobe( newAB.insert(-1, 'x'), "-1 is out of bounds (min 0, max 2)" )
+    iiobe( newAB.insertAll(-2, Array('x', 'y', 'z')), "-2 is out of bounds (min 0, max 2)" )
+    iiobe( newAB.update(-3, 'u'), "-3 is out of bounds (min 0, max 2)" )
+    iiobe( newAB.update(-1, 'u'), "-1 is out of bounds (min 0, max 2)" )
+    iiobe( newAB.update(3, 'u'), "3 is out of bounds (min 0, max 2)" )
+    iiobe( newAB(3), "3 is out of bounds (min 0, max 2)" )
+    iiobe( newAB.remove(3), "3 is out of bounds (min 0, max 2)" )
+    iiobe( newAB.remove(2, 2), "3 is out of bounds (min 0, max 2)" )
+  }
+
+  @Test def `t7880 ensureSize must terminate`(): Unit = {
+    val sut = getMethodAccessible[ArrayBuffer.type]("resizeEnsuring")
+    def resizeEnsuring(length: Int, end: Int, n: Int): Int = sut.invoke(ArrayBuffer, length, end, n).asInstanceOf[Int]
+    assertTrue(7 < ArrayBuffer.DefaultInitialSize)  // condition of test
+    assertEquals(ArrayBuffer.DefaultInitialSize, resizeEnsuring(7, 3, 10))
+    assertEquals(Int.MaxValue - 1, resizeEnsuring(Int.MaxValue / 2, 3, Int.MaxValue / 2 + 1))  // was: ok
+    assertEquals(Int.MaxValue - 1, resizeEnsuring(Int.MaxValue / 2, 3, Int.MaxValue / 2 + 2))  // was: ok
+    assertEquals(Int.MaxValue, resizeEnsuring(Int.MaxValue / 2 + 1, 3, Int.MaxValue / 2 + 1))  // was: wrong
+    assertEquals(Int.MaxValue, resizeEnsuring(Int.MaxValue / 2 + 1, 3, Int.MaxValue / 2 + 2))  // was: hang
+    assertEquals(Int.MaxValue, resizeEnsuring(Int.MaxValue / 2, 3, Int.MaxValue))  // was: hang
+  }
+
+  @Test def `array capacity must follow sizing`(): Unit = {
+    val sut = getMethodAccessible[ArrayBuffer[_]]("array")
+    def array[A](buf: ArrayBuffer[A]) = sut.invokeAs[Array[AnyRef]](buf)
+
+    assertEquals(16, array(ArrayBuffer(1, 2, 3)).length)
+    locally {
+      val buf = new ArrayBuffer(42)
+      assertEquals(42, array(buf).length)
+    }
+    // hint grows to a power of 2
+    locally {
+      val buf = ArrayBuffer(42)
+      buf.sizeHint(100)
+      assertEquals(128, array(buf).length)
+    }
+    locally {
+      val buf = new ArrayBuffer[Int](42)
+      Iterator.continually(42).take(42).foreach(buf.addOne)
+      buf.remove(buf.size - 1)
+      assertEquals(42, array(buf).length)
+    }
+    // not a power of 2, just double capacity
+    locally {
+      val buf = new ArrayBuffer[Int](42)
+      Iterator.continually(42).take(42).foreach(buf.addOne)
+      buf.addOne(17)
+      assertEquals(84, array(buf).length)
+    }
+    locally {
+      val buf = new ArrayBuffer[Int](42)
+      Iterator.continually(42).take(42).foreach(buf.addOne)
+      buf.clearAndShrink(42)
+      assertEquals(42, array(buf).length)
+    }
+    // not a power of 2, just halved capacity
+    locally {
+      val buf = new ArrayBuffer[Int](42)
+      Iterator.continually(42).take(42).foreach(buf.addOne)
+      buf.clearAndShrink(17)
+      assertEquals(21, array(buf).length)
+    }
+  }
+
+  @Test def `downsizing must size down`(): Unit = {
+    val sut = getMethodAccessible[ArrayBuffer.type]("resizeDown")
+    def resizeDown(length: Int, n: Int): Int = sut.invoke(ArrayBuffer, length, n).asInstanceOf[Int]
+    assertTrue(17 > ArrayBuffer.DefaultInitialSize)  // condition of test
+    //assertEquals(ArrayBuffer.DefaultInitialSize, resizeDown(17, 3))  // unexpectedly 17 not 16
+    assertEquals(17, resizeDown(17, 3))
+    assertEquals(32, resizeDown(64, 30))
+    assertEquals(21, resizeDown(42, 17))
+  }
 }

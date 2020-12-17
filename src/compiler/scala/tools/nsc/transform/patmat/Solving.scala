@@ -95,7 +95,8 @@ trait Solving extends Logic {
 
     final case class Solvable(cnf: Cnf, symbolMapping: SymbolMapping) {
       def ++(other: Solvable) = {
-        require(this.symbolMapping eq other.symbolMapping)
+        require(this.symbolMapping eq other.symbolMapping,
+          "this and other must have the same symbol mapping (same reference)")
         Solvable(cnf ++ other.cnf, symbolMapping)
       }
 
@@ -179,23 +180,14 @@ trait Solving extends Logic {
 
         def convert(p: Prop): Option[Lit] = {
           p match {
-            case And(fv)  =>
-              Some(and(fv.flatMap(convert)))
-            case Or(fv)   =>
-              Some(or(fv.flatMap(convert)))
-            case Not(a)   =>
-              convert(a).map(not)
-            case sym: Sym =>
-              Some(convertSym(sym))
-            case True     =>
-              Some(constTrue)
-            case False    =>
-              Some(constFalse)
-            case AtMostOne(ops) =>
-              atMostOne(ops)
-              None
-            case _: Eq    =>
-              throw new MatchError(p)
+            case And(fv)        => Some(and(fv.flatMap(convert)))
+            case Or(fv)         => Some(or(fv.flatMap(convert)))
+            case Not(a)         => convert(a).map(not)
+            case sym: Sym       => Some(convertSym(sym))
+            case True           => Some(constTrue)
+            case False          => Some(constFalse)
+            case AtMostOne(ops) => atMostOne(ops) ; None
+            case _: Eq          => throw new MatchError(p)
           }
         }
 
@@ -239,7 +231,7 @@ trait Solving extends Logic {
         // no need for auxiliary variable
         def not(a: Lit): Lit = -a
 
-        /**
+        /*
          * This encoding adds 3n-4 variables auxiliary variables
          * to encode that at most 1 symbol can be set.
          * See also "Towards an Optimal CNF Encoding of Boolean Cardinality Constraints"
@@ -257,7 +249,7 @@ trait Solving extends Logic {
                 @inline
                 def /\(a: Lit, b: Lit) = addClauseProcessed(clause(a, b))
 
-                val (mid, xn :: Nil) = tail.splitAt(tail.size - 1)
+                val (mid, xn :: Nil) = tail.splitAt(tail.size - 1): @unchecked
 
                 // 1 <= x1,...,xn <==>
                 //

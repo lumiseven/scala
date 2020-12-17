@@ -69,7 +69,7 @@ trait Lifter extends ExprBuilder {
               }
             }
             companionship.record(classesBuffer, moduleClassesBuffer)
-            assert(!expr.isInstanceOf[ClassDef])
+            assert(!expr.isInstanceOf[ClassDef], "expression cannot be a class def")
             super.traverse(tree)
           case _ =>
             super.traverse(tree)
@@ -182,6 +182,7 @@ trait Lifter extends ExprBuilder {
               }
               treeCopy.ClassDef(cd, Modifiers(sym.flags), sym.name, tparams, impl)
             }
+          case x => throw new MatchError(x)
         }
         atPos(t.pos)(treeLifted)
     }.toList

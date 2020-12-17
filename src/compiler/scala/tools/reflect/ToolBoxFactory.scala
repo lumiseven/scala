@@ -110,7 +110,7 @@ abstract class ToolBoxFactory[U <: JavaUniverse](val u: U) { factorySelf =>
           if (namesakes.length > 0) name += ("$" + (namesakes.length + 1))
           freeTermNames += (ft -> newTermName(name + nme.REIFY_FREE_VALUE_SUFFIX))
         })
-        val expr = new Transformer {
+        val expr = new AstTransformer {
           override def transform(tree: Tree): Tree =
             if (tree.hasSymbolField && tree.symbol.isFreeTerm) {
               tree match {
@@ -167,7 +167,7 @@ abstract class ToolBoxFactory[U <: JavaUniverse](val u: U) { factorySelf =>
             }
 
           val invertedIndex = freeTerms map (_.swap)
-          val indexed = new Transformer {
+          val indexed = new AstTransformer {
             override def transform(tree: Tree): Tree =
               tree match {
                 case Ident(name: TermName) if invertedIndex contains name =>
@@ -189,7 +189,7 @@ abstract class ToolBoxFactory[U <: JavaUniverse](val u: U) { factorySelf =>
               case analyzer.SilentResultValue(result) =>
                 trace("success: ")(showAttributed(result, true, true, settings.Yshowsymkinds.value))
                 result
-              case error @ analyzer.SilentTypeError(_) =>
+              case error: analyzer.SilentTypeError =>
                 trace("failed: ")(error.err.errMsg)
                 if (!silent) throw ToolBoxError("reflective typecheck has failed: %s".format(error.err.errMsg))
                 EmptyTree

@@ -14,6 +14,7 @@ package scala
 package collection
 package mutable
 
+import scala.annotation.nowarn
 import scala.collection.Stepper.EfficientSplit
 import scala.collection.generic.DefaultSerializable
 import scala.reflect.ClassTag
@@ -512,6 +513,7 @@ class ArrayDeque[A] protected (
     reset(array = array2, start = 0, end = n)
   }
 
+  @nowarn("""cat=deprecation&origin=scala\.collection\.Iterable\.stringPrefix""")
   override protected[this] def stringPrefix = "ArrayDeque"
 }
 
@@ -527,14 +529,9 @@ object ArrayDeque extends StrictOptimizedSeqFactory[ArrayDeque] {
     val s = coll.knownSize
     if (s >= 0) {
       val array = alloc(s)
-      val it = coll.iterator
-      var i = 0
-      while (it.hasNext) {
-        array(i) = it.next().asInstanceOf[AnyRef]
-        i += 1
-      }
+      IterableOnce.copyElemsToArray(coll, array.asInstanceOf[Array[Any]])
       new ArrayDeque[B](array, start = 0, end = s)
-    } else empty[B] ++= coll
+    } else new ArrayDeque[B]() ++= coll
   }
 
   def newBuilder[A]: Builder[A, ArrayDeque[A]] =
@@ -554,7 +551,7 @@ object ArrayDeque extends StrictOptimizedSeqFactory[ArrayDeque] {
   private[ArrayDeque] final val StableSize = 128
 
   /**
-    * Allocates an array whose size is next power of 2 > $len
+    * Allocates an array whose size is next power of 2 > `len`
     * Largest possible len is 1<<30 - 1
     *
     * @param len

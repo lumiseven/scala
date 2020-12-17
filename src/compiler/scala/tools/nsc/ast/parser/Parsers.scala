@@ -388,6 +388,12 @@ self =>
      */
     def scriptBody(): Tree = {
 
+      // remain backwards-compatible if -Xscript was set but not reasonably
+      settings.script.value match {
+        case null | "" => settings.script.value = "Main"
+        case _ =>
+      }
+
       val stmts = parseStats()
 
       /* If there is only a single object template in the file and it has a
@@ -411,7 +417,7 @@ self =>
           case Template(parents, _, _) => parents.exists(cond(_) { case Ident(tpnme.App) => true })
           case _ => false
         }
-        /* We allow only one main module. */
+        // We allow only one main module.
         var seenModule = false
         var disallowed = EmptyTree: Tree
         val newStmts = stmts.map {
@@ -436,7 +442,7 @@ self =>
         }
       }
 
-      // usually `-Xscript` is why we're here, so expect to search for main
+      // pick up object specified by `-Xscript Main`
       def mainModule: Tree = settings.script.valueSetByUser.map(name => searchForMain(TermName(name))).getOrElse(EmptyTree)
 
       /*  Here we are building an AST representing the following source fiction,
@@ -814,7 +820,7 @@ self =>
 
     /** {{{ { `sep` part } }}}. */
     override final def separatedToken[T](separator: Token, part: => T): List[T] = {
-      require(separator != COMMA)
+      require(separator != COMMA, "separator cannot be a comma")
       val ts = ListBuffer.empty[T]
       while (in.token == separator) {
         in.nextToken()
@@ -1004,12 +1010,16 @@ self =>
       def argType(): Tree
       def functionArgType(): Tree
 
-      // () must be () => R, otherwise (types) could be tuple or (types) => R
+      // () must be () => R; (types) could be tuple or (types) => R
       private def tupleInfixType(start: Offset) = {
-        require(in.token == LPAREN)
-        val ts = inParens{ if (in.token == RPAREN) Nil else functionTypes() }
+        require(in.token == LPAREN, "first token must be a left parenthesis")
+        val ts = inParens { if (in.token == RPAREN) Nil else functionTypes() }
         if (in.token == ARROW)
           atPos(start, in.skipToken()) { makeSafeFunctionType(ts, typ()) }
+        else if (ts.isEmpty) {
+          syntaxError(start, "Illegal literal type (), use Unit instead")
+          EmptyTree
+        }
         else {
           ts foreach checkNotByNameOrVarargs
           val tuple = atPos(start) { makeSafeTupleType(ts) }
@@ -1078,17 +1088,25 @@ self =>
        */
       def simpleType(): Tree = {
         if (isLiteralToken(in.token) && in.token != NULL)
-          atPos(in.offset){SingletonTypeTree(literal())}
+          atPos(in.offset)(SingletonTypeTree(literal()))
         else if (in.name == raw.MINUS && lookingAhead(isNumericLit)) {
           val start = in.offset
           in.nextToken()
-          atPos(start){ SingletonTypeTree(literal(isNegated = true, start = start)) }
+          atPos(start)(SingletonTypeTree(literal(isNegated = true, start = start)))
         } else {
           val start = in.offset
           simpleTypeRest(in.token match {
-            case LPAREN   => atPos(start)(makeSafeTupleType(inParens(types())))
-            case USCORE   => wildcardType(in.skipToken())
-            case _        =>
+            case LPAREN =>
+              if (lookingAhead(in.token == RPAREN)) {
+                in.nextToken()
+                in.nextToken()
+                syntaxError(start, "Illegal literal type (), use Unit instead")
+                EmptyTree
+              }
+              else
+                atPos(start)(makeSafeTupleType(inParens(types())))
+            case USCORE => wildcardType(in.skipToken())
+            case _      =>
               path(thisOK = false, typeOK = true) match {
                 case r @ SingletonTypeTree(_) => r
                 case r => convertToTypeId(r)
@@ -1328,8 +1346,10 @@ self =>
      */
     def literal(isNegated: Boolean = false, inPattern: Boolean = false, start: Offset = in.offset): Tree = atPos(start) {
       def finish(value: Any): Tree = try newLiteral(value) finally in.nextToken()
-      if (in.token == INTERPOLATIONID)
-        interpolatedString(inPattern = inPattern)
+      if (in.token == INTERPOLATIONID) {
+        if (inPattern) interpolatedString(inPattern)
+        else withPlaceholders(interpolatedString(inPattern), isAny = true) // interpolator params are Any* by definition
+      }
       else if (in.token == SYMBOLLIT) {
         def msg(what: String) =
           s"""symbol literal is $what; use Symbol("${in.strVal}") instead"""
@@ -1382,41 +1402,32 @@ self =>
     }
 
     private def interpolatedString(inPattern: Boolean): Tree = {
-      def errpolation() = syntaxErrorOrIncompleteAnd("error in interpolated string: identifier or block expected",
-                                                     skipIt = true)(EmptyTree)
-      // Like Swiss cheese, with holes
-      def stringCheese: Tree = atPos(in.offset) {
-        val start        = in.offset
-        val interpolator = in.name.encoded // ident() for INTERPOLATIONID
-
-        val partsBuf = new ListBuffer[Tree]
-        val exprsBuf = new ListBuffer[Tree]
-        in.nextToken()
-        while (in.token == STRINGPART) {
-          partsBuf += literal()
-          exprsBuf += (
-            if (inPattern) dropAnyBraces(pattern())
-            else in.token match {
-              case IDENTIFIER => atPos(in.offset)(Ident(ident()))
-              //case USCORE   => freshPlaceholder()  // ifonly etapolation
-              case LBRACE     => expr()              // dropAnyBraces(expr0(Local))
-              case THIS       => in.nextToken(); atPos(in.offset)(This(tpnme.EMPTY))
-              case _          => errpolation()
-            }
-          )
-        }
-        if (in.token == STRINGLIT) partsBuf += literal()
+      val start        = in.offset
+      val interpolator = in.name.encoded // ident() for INTERPOLATIONID
+      val partsBuf     = ListBuffer.empty[Tree]
+      val exprsBuf     = ListBuffer.empty[Tree]
+      in.nextToken()
+      while (in.token == STRINGPART) {
+        partsBuf += literal()
+        exprsBuf += (
+          if (inPattern) dropAnyBraces(pattern())
+          else in.token match {
+            case IDENTIFIER => atPos(in.offset)(Ident(ident()))
+            case LBRACE     => expr()
+            case THIS       => in.nextToken(); atPos(in.offset)(This(tpnme.EMPTY))
+            case _          => syntaxErrorOrIncompleteAnd("error in interpolated string: identifier or block expected", skipIt = true)(EmptyTree)
+          }
+        )
+      }
+      if (in.token == STRINGLIT) partsBuf += literal()
 
       // Documenting that it is intentional that the ident is not rooted for purposes of virtualization
       //val t1 = atPos(o2p(start)) { Select(Select (Ident(nme.ROOTPKG), nme.scala_), nme.StringContextName) }
-        val t1 = atPos(o2p(start)) { Ident(nme.StringContextName) }
-        val t2 = atPos(start) { Apply(t1, partsBuf.toList) }
-        t2 setPos t2.pos.makeTransparent
-        val t3 = Select(t2, interpolator) setPos t2.pos
-        atPos(start) { Apply(t3, exprsBuf.toList) }
-      }
-      if (inPattern) stringCheese
-      else withPlaceholders(stringCheese, isAny = true) // string interpolator params are Any* by definition
+      val t1 = atPos(o2p(start)) { Ident(nme.StringContextName) }
+      val t2 = atPos(start) { Apply(t1, partsBuf.toList) } updateAttachment InterpolatedString
+      t2 setPos t2.pos.makeTransparent
+      val t3 = Select(t2, interpolator) setPos t2.pos
+      atPos(start) { Apply(t3, exprsBuf.toList) } updateAttachment InterpolatedString
     }
 
 /* ------------- NEW LINES ------------------------------------------------- */
@@ -1650,15 +1661,19 @@ self =>
           } else if (in.token == MATCH) {
             t = atPos(t.pos.start, in.skipToken())(Match(stripParens(t), inBracesOrNil(caseClauses())))
           }
-          // in order to allow anonymous functions as statements (as opposed to expressions) inside
-          // templates, we have to disambiguate them from self type declarations - bug #1565
-          // The case still missed is unparenthesized single argument, like "x: Int => x + 1", which
-          // may be impossible to distinguish from a self-type and so remains an error.  (See #1564)
+          // disambiguate between self types "x: Int =>" and orphan function literals "(x: Int) => ???"
+          // "(this: Int) =>" is parsed as an erroneous function literal but emits special guidance on
+          // what's probably intended.
           def lhsIsTypedParamList() = t match {
-            case Parens(xs) if xs.forall(isTypedParam) => true
-            case _ => false
+            case Parens(List(Typed(This(_), _))) => {
+              reporter.error(t.pos, "self-type annotation may not be in parentheses")
+              false
+            }
+            case Parens(xs)                      => xs.forall(isTypedParam)
+            case _                               => false
           }
-          if (in.token == ARROW && (location != InTemplate || lhsIsTypedParamList)) {
+
+          if (in.token == ARROW && (location != InTemplate || lhsIsTypedParamList())) {
             t = atPos(t.pos.start, in.skipToken()) {
               Function(convertToParams(t), if (location != InBlock) expr() else block())
             }
@@ -2815,6 +2830,18 @@ self =>
             }
             expr()
           }
+        if (nme.isEncodedUnary(name) && vparamss.nonEmpty) {
+          def instead = DefDef(newmods, name.toTermName.decodedName, tparams, vparamss.drop(1), restype, rhs)
+          def unaryMsg(what: String) = s"unary prefix operator definition with empty parameter list is $what: instead, remove () to declare as `$instead`"
+          def warnNilary(): Unit =
+            if (currentRun.isScala3) syntaxError(nameOffset, unaryMsg("unsupported"))
+            else deprecationWarning(nameOffset, unaryMsg("deprecated"), "2.13.4")
+          vparamss match {
+            case List(List())                               => warnNilary()
+            case List(List(), x :: xs) if x.mods.isImplicit => warnNilary()
+            case _ => // ok
+          }
+        }
         DefDef(newmods, name.toTermName, tparams, vparamss, restype, rhs)
       }
       signalParseProgress(result.pos)
@@ -2996,7 +3023,7 @@ self =>
     def packageOrPackageObject(start: Offset): Tree =
       if (in.token == OBJECT) joinComment(packageObjectDef(start) :: Nil).head
       else {
-        in.flushDoc
+        in.flushDoc()
         makePackaging(start, pkgQualId(), inBracesOrNil(topStatSeq()))
       }
 
@@ -3108,7 +3135,7 @@ self =>
       atPos(tstart1) {
         // Exclude only the 9 primitives plus AnyVal.
         if (inScalaRootPackage && ScalaValueClassNames.contains(name))
-          Template(parents, self, anyvalConstructor :: body)
+          Template(parents, self, anyvalConstructor() :: body)
         else
           gen.mkTemplate(gen.mkParents(mods, parents, parentPos),
                          self, constrMods, vparamss, body, o2p(tstart))
@@ -3150,6 +3177,7 @@ self =>
   /** Create a tree representing a packaging. */
     def makePackaging(start: Offset, pkg: Tree, stats: List[Tree]): PackageDef = pkg match {
       case x: RefTree => atPos(start, pkg.pos.point)(PackageDef(x, stats))
+      case x          => throw new MatchError(x)
     }
 
     def makeEmptyPackage(start: Offset, stats: List[Tree]): PackageDef = (
@@ -3182,7 +3210,7 @@ self =>
       case PACKAGE  =>
         packageOrPackageObject(in.skipToken()) :: Nil
       case IMPORT =>
-        in.flushDoc
+        in.flushDoc()
         importClause()
       case _ if isAnnotation || isTemplateIntro || isModifier =>
         joinComment(topLevelTmplDef :: Nil)
@@ -3197,7 +3225,7 @@ self =>
       var self: ValDef = noSelfType
       var firstOpt: Option[Tree] = None
       if (isExprIntro) checkNoEscapingPlaceholders {
-        in.flushDoc
+        in.flushDoc()
         val first = expr(InTemplate) // @S: first statement is potentially converted so cannot be stubbed.
         if (in.token == ARROW) {
           first match {
@@ -3232,12 +3260,12 @@ self =>
     def templateStats(): List[Tree] = checkNoEscapingPlaceholders { statSeq(templateStat) }
     def templateStat: PartialFunction[Token, List[Tree]] = {
       case IMPORT =>
-        in.flushDoc
+        in.flushDoc()
         importClause()
       case _ if isDefIntro || isModifier || isAnnotation =>
         joinComment(nonLocalDefOrDcl)
       case _ if isExprIntro =>
-        in.flushDoc
+        in.flushDoc()
         statement(InTemplate) :: Nil
     }
 
@@ -3359,7 +3387,7 @@ self =>
               ts ++= topStatSeq()
             }
           } else {
-            in.flushDoc
+            in.flushDoc()
             val pkg = pkgQualId()
 
             if (in.token == EOF) {

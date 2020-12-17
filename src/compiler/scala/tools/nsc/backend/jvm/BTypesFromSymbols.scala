@@ -163,7 +163,7 @@ abstract class BTypesFromSymbols[G <: Global](val global: G) extends BTypes {
   final def typeToBType(t: Type): BType = {
     import definitions.ArrayClass
 
-    /**
+    /*
      * Primitive types are represented as TypeRefs to the class symbol of, for example, scala.Int.
      * The `primitiveTypeMap` maps those class symbols to the corresponding PrimitiveBType.
      */
@@ -175,7 +175,7 @@ abstract class BTypesFromSymbols[G <: Global](val global: G) extends BTypes {
       }
     }
 
-    /**
+    /*
      * When compiling Array.scala, the type parameter T is not erased and shows up in method
      * signatures, e.g. `def apply(i: Int): T`. A TypeRef for T is replaced by ObjectRef.
      */
@@ -211,6 +211,7 @@ abstract class BTypesFromSymbols[G <: Global](val global: G) extends BTypes {
           case RefinedType(parents, _) => parents.map(typeToBType(_).asClassBType).reduceLeft((a, b) => a.jvmWiseLUB(b).get)
           case AnnotatedType(_, t)     => typeToBType(t)
           case ExistentialType(_, t)   => typeToBType(t)
+          case x                       => throw new MatchError(x)
         }
     }
   }
@@ -266,7 +267,7 @@ abstract class BTypesFromSymbols[G <: Global](val global: G) extends BTypes {
   }))
 
   private def computeClassInfo(classSym: Symbol, classBType: ClassBType): Right[Nothing, ClassInfo] = {
-    /**
+    /*
      * Reconstruct the classfile flags from a Java defined class symbol.
      *
      * The implementation of this method is slightly different from `javaFlags` in BTypesFromSymbols.
@@ -406,7 +407,7 @@ abstract class BTypesFromSymbols[G <: Global](val global: G) extends BTypes {
       nestedClasses ++ companionModuleMembers
     }
 
-    /**
+    /*
      * For nested java classes, the scala compiler creates both a class and a module (and therefore
      * a module class) symbol. For example, in `class A { class B {} }`, the nestedClassSymbols
      * for A contain both the class B and the module class B.
@@ -503,7 +504,7 @@ abstract class BTypesFromSymbols[G <: Global](val global: G) extends BTypes {
       else Some(s"${innerClassSym.rawname}${innerClassSym.moduleSuffix}") // moduleSuffix for module classes
     }
 
-    Some(NestedInfo(enclosingClass, outerName, innerName, isStaticNestedClass))
+    Some(NestedInfo(enclosingClass, outerName, innerName, isStaticNestedClass, enteringTyper(innerClassSym.isPrivate)))
   }
 
   /**
@@ -605,6 +606,7 @@ abstract class BTypesFromSymbols[G <: Global](val global: G) extends BTypes {
             val selfParam = methodSym.newSyntheticValueParam(methodSym.owner.typeConstructor, nme.SELF)
             val staticMethodType = methodSym.info match {
               case mt@MethodType(params, res) => copyMethodType(mt, selfParam :: params, res)
+              case x                          => throw new MatchError(x)
             }
             val staticMethodSignature = (staticName, methodBTypeFromMethodType(staticMethodType, isConstructor = false).descriptor)
             val staticMethodInfo = MethodInlineInfo(
